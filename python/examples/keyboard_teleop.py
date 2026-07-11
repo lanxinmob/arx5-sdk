@@ -19,19 +19,19 @@ import click
 
 def start_keyboard_teleop(controller: Arx5CartesianController):
 
-    ori_speed = 1.0
-    pos_speed = 0.4
-    gripper_speed = 0.04
+    ori_speed = 0.5
+    pos_speed = 0.04
+    gripper_speed = 0.02
     target_pose_6d = controller.get_home_pose()
+    
+    robot_config = controller.get_robot_config()
+    controller_config = controller.get_controller_config()
 
-    target_gripper_pos = 0.0
+    target_gripper_pos = 0.08
     cmd_dt = 0.01
     preview_time = 0.1
     window_size = 5
     keyboard_queue = Queue(window_size)
-    robot_config = controller.get_robot_config()
-    controller_config = controller.get_controller_config()
-
     print("Teleop tracking started.")
 
     key_pressed = {
@@ -149,16 +149,22 @@ def start_keyboard_teleop(controller: Arx5CartesianController):
         eef_cmd.timestamp = current_timestamp + preview_time
         controller.set_eef_cmd(eef_cmd)
 
-
 @click.command()
 @click.argument("model")  # ARX arm model: X5 or L5
 @click.argument("interface")  # can bus name (can0 etc.)
 def main(model: str, interface: str):
     robot_config = RobotConfigFactory.get_instance().get_config(model)
+    
+    robot_config.gripper_open_readout = -3.22
+    #robot_config.gripper_width = 0.088
+
     controller_config = ControllerConfigFactory.get_instance().get_config(
         "cartesian_controller", robot_config.joint_dof
     )
+     
     controller = Arx5CartesianController(robot_config, controller_config, interface)
+    print("home_pose:",controller.get_home_pose())
+    print("current_pose:",controller.get_eef_state().pose_6d())
     controller.reset_to_home()
 
     robot_config = controller.get_robot_config()

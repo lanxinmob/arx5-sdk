@@ -14,7 +14,6 @@ import click
 import sys
 import traceback
 
-
 def echo_exception():
     exc_type, exc_value, exc_traceback = sys.exc_info()
     # Extract unformatted traceback
@@ -35,7 +34,12 @@ class Arx5Server:
     ):
         self.model = model
         self.interface = interface
-        self.arx5_cartesian_controller = arx5.Arx5CartesianController(model, interface)
+        robot_config = arx5.RobotConfigFactory.get_instance().get_config(self.model)
+        robot_config.gripper_open_readout = -3.25952
+        controller_config = arx5.ControllerConfigFactory.get_instance().get_config(
+        "cartesian_controller", robot_config.joint_dof
+        )
+        self.arx5_cartesian_controller = arx5.Arx5CartesianController(robot_config, controller_config, interface)
         print(f"Arx5Server is initialized with {model} on {interface}")
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)

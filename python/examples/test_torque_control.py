@@ -33,7 +33,8 @@ def main(model: str, interface: str, urdf_path: str):
         "joint_controller", robot_config.joint_dof
     )
     controller_config.gravity_compensation = False
-    
+    robot_config.gripper_open_readout = -3.24502
+
     # Modify the default configuration here
     # controller_config.controller_dt = 0.01 # etc.
 
@@ -56,8 +57,8 @@ def main(model: str, interface: str, urdf_path: str):
     np.set_printoptions(precision=3, suppress=True)
     arx5_joint_controller.set_log_level(arx5.LogLevel.INFO)
     robot_config = arx5_joint_controller.get_robot_config()
-
-
+    
+    
     arx5_joint_controller.reset_to_home()
     gain = arx5_joint_controller.get_gain()
     gain.kd()[:] *= 0.0
@@ -72,7 +73,7 @@ def main(model: str, interface: str, urdf_path: str):
             cmd = arx5.JointState(robot_config.joint_dof)
             # i = 0
             # cmd.torque()[:] = np.array([1.0, 1.0, 1.0, 0.2, 0.2, 0.0])
-            cmd.torque()[0] = 5.0
+            cmd.torque()[0] = 0.1
             arx5_joint_controller.set_joint_cmd(cmd)
             if not USE_MULTITHREADING:
                 arx5_joint_controller.send_recv_once()

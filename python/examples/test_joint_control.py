@@ -28,6 +28,8 @@ def main(model: str, interface: str):
     # To initialize robot with different configurations,
     # you can create RobotConfig and ControllerConfig by yourself and modify based on it
     robot_config = arx5.RobotConfigFactory.get_instance().get_config(model)
+
+    robot_config.gripper_open_readout = -3.2
     controller_config = arx5.ControllerConfigFactory.get_instance().get_config(
         "joint_controller", robot_config.joint_dof
     )
@@ -64,7 +66,7 @@ def main(model: str, interface: str):
     for i in range(step_num):
         cmd = arx5.JointState(robot_config.joint_dof)
         # i = 0
-        cmd.pos()[0:4] = easeInOutQuad(float(i) / step_num) * target_joint_poses[0:4]
+        cmd.pos()[:] = easeInOutQuad(float(i) / step_num) * target_joint_poses
         cmd.gripper_pos = easeInOutQuad((i / (step_num - 1))) * 0.08
         arx5_joint_controller.set_joint_cmd(cmd)
         if not USE_MULTITHREADING:
@@ -79,8 +81,8 @@ def main(model: str, interface: str):
 
     for i in range(step_num):
         cmd = arx5.JointState(robot_config.joint_dof)
-        cmd.pos()[0:4] = (
-            easeInOutQuad((1 - float(i) / step_num)) * target_joint_poses[0:4]
+        cmd.pos()[:] = (
+            easeInOutQuad((1 - float(i) / step_num)) * target_joint_poses
         )
         cmd.gripper_pos = easeInOutQuad((1 - i / (step_num - 1))) * 0.08
         arx5_joint_controller.set_joint_cmd(cmd)
