@@ -1,0 +1,4 @@
+# Tested with the SDK's Python 3.9 / NumPy 1.x environment.
+numpy>=1.23,<2
+h5py==3.10.0
+opencv-python==4.8.1.78
