@@ -44,8 +44,8 @@ def calibrate_gripper(model: str, interface: str):
     joint_controller_config.gravity_compensation = False
     robot_config = arx5.RobotConfigFactory.get_instance().get_config(model)
     
-    robot_config.gripper_open_readout = -3.22
-    robot_config.gripper_width = 0.088
+    robot_config.gripper_open_readout = -3.34
+    #robot_config.gripper_width = 0.088
     
     joint_controller = arx5.Arx5JointController(
         robot_config, joint_controller_config, interface

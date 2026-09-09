@@ -107,7 +107,7 @@ def start_high_level_replay(controller: Arx5CartesianController, data_file: str)
 def main(model: str, interface: str):
     robot_config = RobotConfigFactory.get_instance().get_config(model)
     
-    robot_config.gripper_open_readout = -3.24502
+    robot_config.gripper_open_readout = -3.42
     #robot_config.gripper_width = 0.088
 
     controller_config = ControllerConfigFactory.get_instance().get_config(

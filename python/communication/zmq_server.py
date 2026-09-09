@@ -35,7 +35,7 @@ class Arx5Server:
         self.model = model
         self.interface = interface
         robot_config = arx5.RobotConfigFactory.get_instance().get_config(self.model)
-        robot_config.gripper_open_readout = -3.25952
+        robot_config.gripper_open_readout = -3.37472
         controller_config = arx5.ControllerConfigFactory.get_instance().get_config(
         "cartesian_controller", robot_config.joint_dof
         )

@@ -155,7 +155,7 @@ def start_keyboard_teleop(controller: Arx5CartesianController):
 def main(model: str, interface: str):
     robot_config = RobotConfigFactory.get_instance().get_config(model)
     
-    robot_config.gripper_open_readout = -3.22
+    robot_config.gripper_open_readout = -3.46933
     #robot_config.gripper_width = 0.088
 
     controller_config = ControllerConfigFactory.get_instance().get_config(
@@ -165,6 +165,10 @@ def main(model: str, interface: str):
     controller = Arx5CartesianController(robot_config, controller_config, interface)
     print("home_pose:",controller.get_home_pose())
     print("current_pose:",controller.get_eef_state().pose_6d())
+    state = controller.get_joint_state()
+    q = np.array(state.pos(), dtype =np.float64,copy=True)
+    print("raw_q:" , q)
+
     controller.reset_to_home()
 
     robot_config = controller.get_robot_config()

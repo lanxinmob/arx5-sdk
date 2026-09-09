@@ -25,14 +25,29 @@ def easeInOutQuad(t):
 def main(model0: str, interface0: str, model1: str, interface1: str):
     np.set_printoptions(precision=3, suppress=True)
     assert(interface0 != interface1)
-    arx5_0 = arx5.Arx5JointController(model0, interface0)
-    arx5_1 = arx5.Arx5JointController(model1, interface1)
-    robot_config = arx5_0.get_robot_config()
-    controller_config = arx5_0.get_controller_config()
+
+    # Create configs first, modify them, then construct the controllers with them
+    robot_config_0 = arx5.RobotConfigFactory.get_instance().get_config(model0)
+    robot_config_0.gripper_open_readout = -3.4
+    controller_config_0 = arx5.ControllerConfigFactory.get_instance().get_config(
+        "joint_controller", robot_config_0.joint_dof
+    )
+    controller_config = controller_config_0
+    robot_config_1 = arx5.RobotConfigFactory.get_instance().get_config(model1)
+    robot_config_1.gripper_open_readout = -3.4
+    controller_config_1 = arx5.ControllerConfigFactory.get_instance().get_config(
+        "joint_controller", robot_config_1.joint_dof
+    )
+
+    arx5_0 = arx5.Arx5JointController(robot_config_0, controller_config_0, interface0)
+    arx5_1 = arx5.Arx5JointController(robot_config_1, controller_config_1, interface1)
+    robot_config = robot_config_0
 
     arx5_0.reset_to_home()
     arx5_1.reset_to_home()
 
+    arx5_0.set_log_level(arx5.LogLevel.INFO)
+    arx5_1.set_log_level(arx5.LogLevel.INFO)
     target_joint_poses = np.array([1.0, 2.0, 2.0, 1.5, 1.5, -1.57])
     step_num = 1500  # 3s
 
