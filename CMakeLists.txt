@@ -8,7 +8,10 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON) # global PIC
 
 find_package(Threads REQUIRED)
-find_package(Eigen3 REQUIRED)
+find_package(Eigen3 3.3 REQUIRED)
+if(Eigen3_VERSION VERSION_GREATER_EQUAL 4)
+    message(FATAL_ERROR "Prebuilt libsolver requires Eigen 3.x; set Eigen3_DIR to an Eigen 3 installation")
+endif()
 find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(fmt REQUIRED)

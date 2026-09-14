@@ -132,6 +132,9 @@ class ArxCan
     void clear(uint16_t ID);
 
     const std::array<OD_Motor_Msg, 10> get_motor_msg();
+  private:
+    // libhardware stores a shared_ptr here; the public stub omitted its storage.
+    std::shared_ptr<CanInterface> can_interface_;
 };
 
 #endif
