@@ -5,7 +5,7 @@ import numpy as np
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
-sys.path.append(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 
 import time
@@ -52,6 +52,8 @@ class Arx5AgentSafeServer:
 
         self.model = model
         self.interface = interface
+        if not hasattr(arx5.Arx5CartesianController, "is_emergency"):
+            raise RuntimeError("Build the patched local SDK before starting the guarded server")
         robot_config = arx5.RobotConfigFactory.get_instance().get_config(self.model)
         robot_config.gripper_open_readout = -3.37472
         controller_config = arx5.ControllerConfigFactory.get_instance().get_config(
@@ -93,6 +95,7 @@ class Arx5AgentSafeServer:
         eef_state = self.controller.get_eef_state()
         joint_state = self.controller.get_joint_state()
         return {
+            "emergency": self.controller.is_emergency(),
             "timestamp": eef_state.timestamp,
             "ee_pose": eef_state.pose_6d().copy(),
             "joint_pos": joint_state.pos().copy(),
@@ -164,6 +167,8 @@ class Arx5AgentSafeServer:
         return float(array.item())
 
     def _handle_message(self, message: Any) -> None:
+        if self.controller.is_emergency():
+            self.guard.disarm()
         if not isinstance(message, dict):
             self._send_error("UNKNOWN", "message must be a dict")
             return

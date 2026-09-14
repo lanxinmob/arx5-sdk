@@ -1,5 +1,57 @@
 # C++ && Python Controller for ARX5 Robot Arm
 
+## Patched Local Controller
+
+The local controller now latches state/overcurrent faults without blocking
+state queries or shutdown. `is_emergency()` reports the latch; joint commands,
+Cartesian commands, gain changes and homing are rejected until a new controller
+is created after the physical fault is resolved. Fault output is damping only,
+without position or gravity feedforward torque. This is not power removal or
+a certified emergency stop; an unsupported arm may settle under gravity.
+
+Failed Cartesian IK is rejected before changing the trajectory. Python state
+and gain array views retain their owning objects, including views obtained
+from temporary `get_joint_state()` and `get_eef_state()` results.
+
+Build on this robot host using the existing `arx5` environment and Eigen 3.4:
+
+```bash
+conda activate arx5
+cd /home/hjadmin/projects/arx5-sdk
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
+  -DEigen3_DIR=/usr/share/eigen3/cmake \
+  -DPython3_EXECUTABLE="$CONDA_PREFIX/bin/python" \
+  -DPYTHON_EXECUTABLE="$CONDA_PREFIX/bin/python" \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build --target arx5_interface -j 4
+PYTHONPATH="$PWD/python" python -c \
+  'import arx5_interface as a; print(a.__file__); assert hasattr(a.Arx5JointController, "is_emergency")'
+```
+
+The printed module must be the `.so` under this repository's `python/`, not
+the older installed wheel. Eigen 5 is ABI-incompatible with the prebuilt
+solver. The guarded server selects the local module and refuses an unpatched
+one; its `GET_STATE` response includes `emergency`.
+
+The task arm here is `X5_umi / can0`; `can1` is the demonstration arm. Start
+`python/communication/zmq_server_agent_safe.py X5_umi can0` with measured
+`--workspace-min X Y Z` and `--workspace-max X Y Z` bounds. Initialization
+enables hardware; `RESET_TO_HOME` moves the arm and opens the gripper. Do not
+start another controller on the same bus. Close the gripper while powered off
+before a power cycle; do not bypass an out-of-range reading by changing its
+zero or calibration sign.
+
+Recovery verification: offline fault injection covered invalid initialization,
+gripper range, overcurrent, non-finite feedback, negative joint outliers, IK
+rejection and clean shutdown. On `can0`, a 2 mm upward target produced about
+0.59 mm measured travel, followed by a return within 0.024 mm of the baseline.
+This verifies basic movement, not accurate 2 mm or full six-axis tracking.
+The temporary live probe independently checked incoming CAN frame freshness;
+SDK state timestamps alone do not prove fresh motor feedback. Keep a physical
+stop available and validate telemetry freshness, tracking and workspace
+geometry before autonomous manipulation.
+
 ## Safety-Related Configs
 
  - The safety checks in this controller are implemented through joint position, velocity, and torque limits. However, there is a trade-off between safety and reactiveness when setting these limits. To achieve a reasonable precision for our experiements, **the default values are insufficient to guarantee safety when the robot is close to singularity or the input control signal includes a lot of noise**.
