@@ -405,6 +405,7 @@ JointState JointStateInterpolator::interpolate(double time)
             throw std::runtime_error("Interpolation failed");
         }
     }
+    throw std::runtime_error("No valid interpolation segment");
 }
 
 std::string JointStateInterpolator::to_string()

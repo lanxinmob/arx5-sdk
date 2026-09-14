@@ -3,6 +3,7 @@
 #include "app/config.h"
 #include "utils.h"
 #include <stdexcept>
+#include <limits>
 #include <sys/syscall.h>
 #include <sys/types.h>
 
@@ -28,14 +29,21 @@ Arx5CartesianController::Arx5CartesianController(std::string model, std::string 
 
 void Arx5CartesianController::set_eef_cmd(EEFState new_cmd)
 {
+    require_healthy_();
+    if (!new_cmd.pose_6d.allFinite() || !std::isfinite(new_cmd.timestamp) ||
+        !std::isfinite(new_cmd.gripper_pos) || !std::isfinite(new_cmd.gripper_vel) ||
+        !std::isfinite(new_cmd.gripper_torque))
+        throw std::invalid_argument("Invalid end-effector command");
     JointState current_joint_state = get_joint_state();
 
     // The following line only works under c++17
     // auto [success, target_joint_pos] = solver_->inverse_kinematics(new_cmd.pose_6d, current_joint_state.pos);
 
     std::tuple<int, VecDoF> ik_results;
-    ik_results = multi_trial_ik(new_cmd.pose_6d, joint_state_.pos);
+    ik_results = multi_trial_ik(new_cmd.pose_6d, current_joint_state.pos);
     int ik_status = std::get<0>(ik_results);
+    if (ik_status != 0)
+        throw std::runtime_error("Inverse kinematics rejected: " + solver_->get_ik_status_name(ik_status));
 
     if (new_cmd.timestamp == 0)
         new_cmd.timestamp = get_timestamp() + controller_config_.default_preview_time;
@@ -50,26 +58,30 @@ void Arx5CartesianController::set_eef_cmd(EEFState new_cmd)
     double current_time = get_timestamp();
     // TODO: include velocity
     std::lock_guard<std::mutex> guard(cmd_mutex_);
+    require_healthy_();
     interpolator_.override_waypoint(get_timestamp(), target_joint_state);
-
-    if (ik_status != 0)
-    {
-        logger_->warn("Inverse kinematics failed: {} ({})", solver_->get_ik_status_name(ik_status), ik_status);
-    }
 }
 
 void Arx5CartesianController::set_eef_traj(std::vector<EEFState> new_traj)
 {
+    require_healthy_();
     double start_time = get_timestamp();
     std::vector<JointState> joint_traj;
     double avg_window_s = 0.05;
-    joint_traj.push_back(interpolator_.interpolate(start_time - 2 * avg_window_s));
-    joint_traj.push_back(interpolator_.interpolate(start_time - avg_window_s));
-    joint_traj.push_back(interpolator_.interpolate(start_time));
+    {
+        std::lock_guard<std::mutex> guard(cmd_mutex_);
+        joint_traj.push_back(interpolator_.interpolate(start_time - 2 * avg_window_s));
+        joint_traj.push_back(interpolator_.interpolate(start_time - avg_window_s));
+        joint_traj.push_back(interpolator_.interpolate(start_time));
+    }
 
     double prev_timestamp = 0;
     for (auto eef_state : new_traj)
     {
+        if (!eef_state.pose_6d.allFinite() || !std::isfinite(eef_state.timestamp) ||
+            !std::isfinite(eef_state.gripper_pos) || !std::isfinite(eef_state.gripper_vel) ||
+            !std::isfinite(eef_state.gripper_torque))
+            throw std::invalid_argument("Invalid end-effector waypoint");
         if (eef_state.timestamp <= start_time)
             continue;
         if (eef_state.timestamp == 0)
@@ -80,6 +92,8 @@ void Arx5CartesianController::set_eef_traj(std::vector<EEFState> new_traj)
         std::tuple<int, VecDoF> ik_results;
         ik_results = multi_trial_ik(eef_state.pose_6d, current_joint_state.pos);
         int ik_status = std::get<0>(ik_results);
+        if (ik_status != 0)
+            throw std::runtime_error("Inverse kinematics rejected: " + solver_->get_ik_status_name(ik_status));
 
         JointState target_joint_state{robot_config_.joint_dof};
         target_joint_state.pos = std::get<1>(ik_results);
@@ -91,10 +105,6 @@ void Arx5CartesianController::set_eef_traj(std::vector<EEFState> new_traj)
         joint_traj.push_back(target_joint_state);
         prev_timestamp = eef_state.timestamp;
 
-        if (ik_status != 0)
-        {
-            logger_->warn("Inverse kinematics failed: {} ({})", solver_->get_ik_status_name(ik_status), ik_status);
-        }
     }
 
     double ik_end_time = get_timestamp();
@@ -104,6 +114,7 @@ void Arx5CartesianController::set_eef_traj(std::vector<EEFState> new_traj)
 
     double current_time = get_timestamp();
     std::lock_guard<std::mutex> guard(cmd_mutex_);
+    require_healthy_();
 
     interpolator_.override_traj(current_time, joint_traj);
 
@@ -131,6 +142,8 @@ std::tuple<int, Eigen::VectorXd> Arx5CartesianController::multi_trial_ik(Eigen::
 {
     if (additional_trial_num < 0)
         throw std::invalid_argument("Number of additional trials must be non-negative");
+    if (!target_pose_6d.allFinite() || !current_joint_pos.allFinite())
+        throw std::invalid_argument("IK inputs must be finite");
     // Solve IK with at least 2 init joint positions: current joint position and home joint position
     if (current_joint_pos.size() != robot_config_.joint_dof || target_pose_6d.size() != 6)
         throw std::invalid_argument(
@@ -152,7 +165,7 @@ std::tuple<int, Eigen::VectorXd> Arx5CartesianController::multi_trial_ik(Eigen::
     }
     Eigen::MatrixXd target_joint_positions = Eigen::MatrixXd::Zero(additional_trial_num + 2, robot_config_.joint_dof);
     std::vector<int> all_ik_status(additional_trial_num + 2, 0);
-    std::vector<double> distances(additional_trial_num + 2, 100000); // L2 distances, initialize to infinity
+    std::vector<double> distances(additional_trial_num + 2, std::numeric_limits<double>::infinity());
 
     for (int i = 0; i < additional_trial_num + 2; i++)
     {
@@ -162,24 +175,18 @@ std::tuple<int, Eigen::VectorXd> Arx5CartesianController::multi_trial_ik(Eigen::
         Eigen::VectorXd target_joint_pos = std::get<1>(result);
         bool in_joint_limit = ((robot_config_.joint_pos_max - target_joint_pos).array() > 0).all() &&
                               ((robot_config_.joint_pos_min - target_joint_pos).array() < 0).all();
-        if (ik_status == 0 && !in_joint_limit)
+        if (ik_status == 0 && (!in_joint_limit || !target_joint_pos.allFinite()))
         {
             ik_status = -9; // E_EXCEED_JOINT_LIMIT
         }
         all_ik_status[i] = ik_status;
         // Check whether the target joint position is within the joint limits
-        distances[i] = (target_joint_pos - current_joint_pos).norm();
+        if (ik_status == 0)
+            distances[i] = (target_joint_pos - current_joint_pos).norm();
         target_joint_positions.row(i) = target_joint_pos;
     }
-    bool final_success = std::any_of(all_ik_status.begin(), all_ik_status.end(), [](bool success) { return success; });
     int min_idx = std::distance(distances.begin(), std::min_element(distances.begin(), distances.end()));
     int min_ik_status = all_ik_status[min_idx];
     Eigen::VectorXd min_target_joint_pos = target_joint_positions.row(min_idx);
-    // clip the target joint position to the joint limits
-    for (int i = 0; i < robot_config_.joint_dof; i++)
-    {
-        min_target_joint_pos[i] =
-            std::max(robot_config_.joint_pos_min[i], std::min(robot_config_.joint_pos_max[i], min_target_joint_pos[i]));
-    }
     return std::make_tuple(min_ik_status, min_target_joint_pos);
 }

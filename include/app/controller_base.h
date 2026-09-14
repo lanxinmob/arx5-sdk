@@ -6,6 +6,7 @@
 #include "hardware/arx_can.h"
 #include "utils.h"
 #include <chrono>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -35,6 +36,7 @@ class Arx5ControllerBase // parent class for the other two controllers
 
     void reset_to_home();
     void set_to_damping();
+    bool is_emergency() const { return emergency_.load(); }
 
   protected:
     RobotConfig robot_config_;
@@ -52,8 +54,9 @@ class Arx5ControllerBase // parent class for the other two controllers
     std::thread background_send_recv_thread_;
 
     bool prev_gripper_updated_ = false; // To suppress the warning message
-    bool background_send_recv_running_ = false;
-    bool destroy_background_threads_ = false;
+    std::atomic<bool> background_send_recv_running_{false};
+    std::atomic<bool> destroy_background_threads_{false};
+    std::atomic<bool> emergency_{false};
 
     std::mutex cmd_mutex_;
     std::mutex state_mutex_;
@@ -70,6 +73,7 @@ class Arx5ControllerBase // parent class for the other two controllers
     void over_current_protection_();
     void background_send_recv_();
     void enter_emergency_state_();
+    void require_healthy_() const;
 };
 } // namespace arx
 

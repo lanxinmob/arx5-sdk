@@ -23,12 +23,20 @@ Arx5JointController::Arx5JointController(std::string model, std::string interfac
 
 void Arx5JointController::set_joint_cmd(JointState new_cmd)
 {
+    require_healthy_();
+    if (new_cmd.pos.size() != robot_config_.joint_dof || new_cmd.vel.size() != robot_config_.joint_dof ||
+        new_cmd.torque.size() != robot_config_.joint_dof || !new_cmd.pos.allFinite() ||
+        !new_cmd.vel.allFinite() || !new_cmd.torque.allFinite() || !std::isfinite(new_cmd.timestamp) ||
+        !std::isfinite(new_cmd.gripper_pos) || !std::isfinite(new_cmd.gripper_vel) ||
+        !std::isfinite(new_cmd.gripper_torque))
+        throw std::invalid_argument("Invalid joint command");
     JointState current_joint_state = get_joint_state();
     double current_time = get_timestamp();
     if (new_cmd.timestamp == 0)
         new_cmd.timestamp = current_time + controller_config_.default_preview_time;
 
     std::lock_guard<std::mutex> guard(cmd_mutex_);
+    require_healthy_();
     if (abs(new_cmd.timestamp - current_time) < 1e-3)
         // If the new timestamp is close enough (<1ms) to the current time
         // Will override the entire interpolator object
@@ -39,16 +47,27 @@ void Arx5JointController::set_joint_cmd(JointState new_cmd)
 
 void Arx5JointController::set_joint_traj(std::vector<JointState> new_traj)
 {
+    require_healthy_();
     double start_time = get_timestamp();
     std::vector<JointState> joint_traj;
     double avg_window_s = 0.05;
-    joint_traj.push_back(interpolator_.interpolate(start_time - 2 * avg_window_s));
-    joint_traj.push_back(interpolator_.interpolate(start_time - avg_window_s));
-    joint_traj.push_back(interpolator_.interpolate(start_time));
+    {
+        std::lock_guard<std::mutex> guard(cmd_mutex_);
+        joint_traj.push_back(interpolator_.interpolate(start_time - 2 * avg_window_s));
+        joint_traj.push_back(interpolator_.interpolate(start_time - avg_window_s));
+        joint_traj.push_back(interpolator_.interpolate(start_time));
+    }
 
     double prev_timestamp = 0;
     for (auto joint_state : new_traj)
     {
+        if (joint_state.pos.size() != robot_config_.joint_dof ||
+            joint_state.vel.size() != robot_config_.joint_dof ||
+            joint_state.torque.size() != robot_config_.joint_dof ||
+            !joint_state.pos.allFinite() || !joint_state.vel.allFinite() || !joint_state.torque.allFinite() ||
+            !std::isfinite(joint_state.timestamp) || !std::isfinite(joint_state.gripper_pos) ||
+            !std::isfinite(joint_state.gripper_vel) || !std::isfinite(joint_state.gripper_torque))
+            throw std::invalid_argument("Invalid joint waypoint");
         if (joint_state.timestamp <= start_time)
             continue;
         if (joint_state.timestamp == 0)
@@ -61,6 +80,7 @@ void Arx5JointController::set_joint_traj(std::vector<JointState> new_traj)
     calc_joint_vel(joint_traj, avg_window_s);
 
     std::lock_guard<std::mutex> guard(cmd_mutex_);
+    require_healthy_();
     interpolator_.override_traj(get_timestamp(), joint_traj);
 }
 
@@ -88,6 +108,7 @@ void Arx5JointController::send_recv_once()
 
 void Arx5JointController::calibrate_gripper()
 {
+    require_healthy_();
     bool prev_running = background_send_recv_running_;
     background_send_recv_running_ = false;
     sleep_us(1000);
@@ -130,6 +151,7 @@ void Arx5JointController::calibrate_gripper()
 
 void Arx5JointController::calibrate_joint(int joint_id)
 {
+    require_healthy_();
     bool prev_running = background_send_recv_running_;
     background_send_recv_running_ = false;
     sleep_us(1000);

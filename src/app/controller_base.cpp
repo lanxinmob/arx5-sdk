@@ -24,9 +24,17 @@ Arx5ControllerBase::Arx5ControllerBase(RobotConfig robot_config, ControllerConfi
                       "controller_config_.shutdown_to_passive is set to `true`");
         controller_config_.shutdown_to_passive = true;
     }
-    init_robot_();
-    background_send_recv_thread_ = std::thread(&Arx5ControllerBase::background_send_recv_, this);
-    background_send_recv_running_ = controller_config_.background_send_recv;
+    try
+    {
+        init_robot_();
+        background_send_recv_running_ = controller_config_.background_send_recv;
+        background_send_recv_thread_ = std::thread(&Arx5ControllerBase::background_send_recv_, this);
+    }
+    catch (...)
+    {
+        spdlog::drop(logger_->name());
+        throw;
+    }
     logger_->info("Background send_recv task is running at ID: {}", syscall(SYS_gettid));
 }
 
@@ -44,15 +52,18 @@ Arx5ControllerBase::~Arx5ControllerBase()
         // damping_gain.kd[2] *= 3;
         // damping_gain.kd[3] *= 1.5;
 
-        set_gain(damping_gain);
         {
             std::lock_guard<std::mutex> guard(cmd_mutex_);
+            if (!is_emergency())
+                gain_ = damping_gain;
             output_joint_cmd_.vel = VecDoF::Zero(robot_config_.joint_dof);
             output_joint_cmd_.torque = VecDoF::Zero(robot_config_.joint_dof);
+            output_joint_cmd_.gripper_vel = 0;
+            output_joint_cmd_.gripper_torque = 0;
             interpolator_.init_fixed(output_joint_cmd_);
+            controller_config_.gravity_compensation = false;
         }
         background_send_recv_running_ = true;
-        controller_config_.gravity_compensation = false;
         sleep_ms(2000);
     }
     else
@@ -97,8 +108,15 @@ EEFState Arx5ControllerBase::get_eef_state()
 
 void Arx5ControllerBase::set_gain(Gain new_gain)
 {
+    require_healthy_();
+    if (new_gain.kp.size() != robot_config_.joint_dof || new_gain.kd.size() != robot_config_.joint_dof ||
+        !new_gain.kp.allFinite() || !new_gain.kd.allFinite() ||
+        !std::isfinite(new_gain.gripper_kp) || !std::isfinite(new_gain.gripper_kd) ||
+        (new_gain.kp.array() < 0).any() || (new_gain.kd.array() < 0).any() ||
+        new_gain.gripper_kp < 0 || new_gain.gripper_kd < 0)
+        throw std::invalid_argument("Gains must be finite, nonnegative, and match joint_dof");
     // Make sure the robot doesn't jump when setting kp to non-zero
-    if (gain_.kp.isZero() && !new_gain.kp.isZero())
+    if (get_gain().kp.isZero() && !new_gain.kp.isZero())
     {
         JointState joint_state = get_joint_state();
         JointState joint_cmd = get_joint_cmd();
@@ -118,6 +136,7 @@ void Arx5ControllerBase::set_gain(Gain new_gain)
     }
     {
         std::lock_guard<std::mutex> guard(cmd_mutex_);
+        require_healthy_();
         gain_ = new_gain;
     }
 }
@@ -151,10 +170,9 @@ void Arx5ControllerBase::set_log_level(spdlog::level::level_enum level)
 
 void Arx5ControllerBase::reset_to_home()
 {
+    require_healthy_();
     JointState init_state = get_joint_state();
     Gain init_gain = get_gain();
-    double init_gripper_kp = gain_.gripper_kp;
-    double init_gripper_kd = gain_.gripper_kd;
     Gain target_gain{robot_config_.joint_dof};
     if (init_gain.kp.isZero())
     {
@@ -188,6 +206,7 @@ void Arx5ControllerBase::reset_to_home()
 
     {
         std::lock_guard<std::mutex> guard(cmd_mutex_);
+        require_healthy_();
         JointState start_state{robot_config_.joint_dof};
         start_state.pos = init_state.pos;
         start_state.gripper_pos = init_state.gripper_pos;
@@ -207,6 +226,7 @@ void Arx5ControllerBase::reset_to_home()
     target_state.timestamp = get_timestamp() + 0.5;
     {
         std::lock_guard<std::mutex> guard(cmd_mutex_);
+        require_healthy_();
         interpolator_.override_waypoint(get_timestamp(), target_state);
     }
     logger_->info("Finish reset to home");
@@ -215,15 +235,20 @@ void Arx5ControllerBase::reset_to_home()
 
 void Arx5ControllerBase::set_to_damping()
 {
+    if (is_emergency())
+        return; // The latched fault already enforces damping on every cycle.
     Gain damping_gain{robot_config_.joint_dof};
     damping_gain.kd = controller_config_.default_kd;
-    set_gain(damping_gain);
-    sleep_ms(10);
     JointState joint_state = get_joint_state();
     {
         std::lock_guard<std::mutex> guard(cmd_mutex_);
+        if (is_emergency())
+            return;
+        gain_ = damping_gain;
         joint_state.vel = VecDoF::Zero(robot_config_.joint_dof);
         joint_state.torque = VecDoF::Zero(robot_config_.joint_dof);
+        joint_state.gripper_vel = 0;
+        joint_state.gripper_torque = 0;
         interpolator_.init_fixed(joint_state);
     }
 }
@@ -255,6 +280,11 @@ void Arx5ControllerBase::init_robot_()
         recv_();
         check_joint_state_sanity_();
         over_current_protection_();
+        if (is_emergency())
+        {
+            send_recv_();
+            require_healthy_();
+        }
         // logger_->info("pos: {}", vec2str(joint_state_.pos));
     }
 
@@ -285,70 +315,100 @@ void Arx5ControllerBase::init_robot_()
         send_recv_();
         check_joint_state_sanity_();
         over_current_protection_();
+        if (is_emergency())
+        {
+            send_recv_();
+            require_healthy_();
+        }
     }
 }
 
 void Arx5ControllerBase::check_joint_state_sanity_()
 {
-    std::lock_guard<std::mutex> guard(state_mutex_);
+    if (is_emergency())
+        return;
+    const JointState state = get_joint_state();
+    JointState cmd(robot_config_.joint_dof);
+    bool has_cmd;
+    {
+        std::lock_guard<std::mutex> guard(cmd_mutex_);
+        has_cmd = interpolator_.is_initialized();
+        if (has_cmd)
+            cmd = interpolator_.interpolate(get_timestamp());
+    }
+    if (!state.pos.allFinite() || !state.vel.allFinite() || !state.torque.allFinite() ||
+        !std::isfinite(state.gripper_pos) || !std::isfinite(state.gripper_vel) ||
+        !std::isfinite(state.gripper_torque) ||
+        (has_cmd && (!cmd.pos.allFinite() || !cmd.vel.allFinite() || !cmd.torque.allFinite() ||
+                     !std::isfinite(cmd.gripper_pos) || !std::isfinite(cmd.gripper_vel) ||
+                     !std::isfinite(cmd.gripper_torque))))
+    {
+        logger_->error("Non-finite robot state or command");
+        enter_emergency_state_();
+        return;
+    }
 
     for (int i = 0; i < robot_config_.joint_dof; ++i)
     {
-        if (std::abs(joint_state_.pos[i]) > robot_config_.joint_pos_max[i] + 3.14 ||
-            std::abs(joint_state_.pos[i]) < robot_config_.joint_pos_min[i] - 3.14)
+        if (state.pos[i] > robot_config_.joint_pos_max[i] + 3.14 ||
+            state.pos[i] < robot_config_.joint_pos_min[i] - 3.14)
         {
-            logger_->error("Joint {} pos data error: {:.3f}. Please restart the program.", i, joint_state_.pos[i]);
+            logger_->error("Joint {} pos data error: {:.3f}. Please restart the program.", i, state.pos[i]);
             enter_emergency_state_();
+            return;
         }
 
-        if (interpolator_.is_initialized())
+        if (has_cmd)
         {
-            std::lock_guard<std::mutex> guard(cmd_mutex_);
-            JointState interpolator_cmd = interpolator_.interpolate(get_timestamp());
-            if (std::abs(interpolator_cmd.pos[i]) > robot_config_.joint_pos_max[i] + 3.14 ||
-                std::abs(interpolator_cmd.pos[i]) < robot_config_.joint_pos_min[i] - 3.14)
+            if (cmd.pos[i] > robot_config_.joint_pos_max[i] + 3.14 ||
+                cmd.pos[i] < robot_config_.joint_pos_min[i] - 3.14)
             {
                 logger_->error("Joint {} interpolated command data error: {:.3f}. Please restart the program.", i,
-                               interpolator_cmd.pos[i]);
+                               cmd.pos[i]);
                 enter_emergency_state_();
+                return;
             }
         }
-        if (std::abs(joint_state_.torque[i]) > 100 * robot_config_.joint_torque_max[i])
+        if (std::abs(state.torque[i]) > 100 * robot_config_.joint_torque_max[i])
         {
             logger_->error("Joint {} torque data error: {:.3f}. Please restart the program.", i,
-                           joint_state_.torque[i]);
+                           state.torque[i]);
             enter_emergency_state_();
+            return;
         }
     }
     // Gripper should be around 0~robot_config_.gripper_width
     double gripper_width_tolerance = 0.005; // m
-    if (joint_state_.gripper_pos < -gripper_width_tolerance ||
-        joint_state_.gripper_pos > robot_config_.gripper_width + gripper_width_tolerance)
+    if (state.gripper_pos < -gripper_width_tolerance ||
+        state.gripper_pos > robot_config_.gripper_width + gripper_width_tolerance)
     {
         logger_->error("Gripper position error: got {:.3f} but should be in 0~{:.3f} (m). Please close the gripper "
                        "before turning on the arm; change robot_config.gripper_open_readout to a negative number (a "
                        "common value is -3.4 for some recent robots); or recalibrate gripper home and width.",
-                       joint_state_.gripper_pos, robot_config_.gripper_width);
+                       state.gripper_pos, robot_config_.gripper_width);
         enter_emergency_state_();
     }
 }
 
 void Arx5ControllerBase::over_current_protection_()
 {
+    if (is_emergency())
+        return;
+    const JointState state = get_joint_state();
     bool over_current = false;
     for (int i = 0; i < robot_config_.joint_dof; ++i)
     {
-        if (std::abs(joint_state_.torque[i]) > robot_config_.joint_torque_max[i])
+        if (std::abs(state.torque[i]) > robot_config_.joint_torque_max[i])
         {
             over_current = true;
-            logger_->error("Over current detected once on joint {}, current: {:.3f}", i, joint_state_.torque[i]);
+            logger_->error("Over current detected once on joint {}, current: {:.3f}", i, state.torque[i]);
             break;
         }
     }
-    if (std::abs(joint_state_.gripper_torque) > robot_config_.gripper_torque_max)
+    if (std::abs(state.gripper_torque) > robot_config_.gripper_torque_max)
     {
         over_current = true;
-        logger_->error("Over current detected once on gripper, current: {:.3f}", joint_state_.gripper_torque);
+        logger_->error("Over current detected once on gripper, current: {:.3f}", state.gripper_torque);
     }
     if (over_current)
     {
@@ -368,23 +428,24 @@ void Arx5ControllerBase::over_current_protection_()
 
 void Arx5ControllerBase::enter_emergency_state_()
 {
+    std::lock_guard<std::mutex> guard(cmd_mutex_);
+    if (emergency_.exchange(true))
+        return;
     Gain damping_gain{robot_config_.joint_dof};
     damping_gain.kd = controller_config_.default_kd;
     damping_gain.kd[1] *= 3;
     damping_gain.kd[2] *= 3;
     damping_gain.kd[3] *= 1.5;
-    logger_->error("Emergency state entered. Please restart the program.");
-    while (true)
-    {
-        std::lock_guard<std::mutex> guard(cmd_mutex_);
-        set_gain(damping_gain);
-        output_joint_cmd_.vel = VecDoF::Zero(robot_config_.joint_dof);
-        output_joint_cmd_.torque = VecDoF::Zero(robot_config_.joint_dof);
+    gain_ = damping_gain;
+    output_joint_cmd_ = JointState(robot_config_.joint_dof);
+    interpolator_.init_fixed(output_joint_cmd_);
+    logger_->error("Emergency latched: damping only; motion rejected until controller restart.");
+}
 
-        interpolator_.init_fixed(output_joint_cmd_);
-        send_recv_();
-        sleep_ms(5);
-    }
+void Arx5ControllerBase::require_healthy_() const
+{
+    if (is_emergency())
+        throw std::runtime_error("Emergency latched; restart the controller after resolving the fault");
 }
 
 void Arx5ControllerBase::update_joint_state_()
@@ -434,16 +495,19 @@ void Arx5ControllerBase::update_joint_state_()
 
 void Arx5ControllerBase::update_output_cmd_()
 {
+    std::unique_lock<std::mutex> cmd_guard(cmd_mutex_, std::defer_lock);
+    std::unique_lock<std::mutex> state_guard(state_mutex_, std::defer_lock);
+    std::lock(cmd_guard, state_guard);
+    if (is_emergency())
+    {
+        output_joint_cmd_ = JointState(robot_config_.joint_dof);
+        return; // No position, feedforward or gravity torque while faulted.
+    }
     JointState prev_output_cmd = output_joint_cmd_;
 
     // TODO: deal with non-zero velocity and torque for joint control
     double timestamp = get_timestamp();
-    {
-        std::lock_guard<std::mutex> guard(cmd_mutex_);
-        output_joint_cmd_ = interpolator_.interpolate(timestamp);
-    }
-
-    std::lock_guard<std::mutex> guard(state_mutex_);
+    output_joint_cmd_ = interpolator_.interpolate(timestamp);
     if (controller_config_.gravity_compensation)
     {
         output_joint_cmd_.torque += solver_->inverse_dynamics(joint_state_.pos, VecDoF::Zero(robot_config_.joint_dof),
@@ -625,7 +689,7 @@ void Arx5ControllerBase::send_recv_()
     if (robot_config_.gripper_motor_type == MotorType::DM_J4310)
     {
         int start_send_motor_time_us = get_time_us();
-
+        std::lock_guard<std::mutex> guard(cmd_mutex_);
         double gripper_motor_pos =
             output_joint_cmd_.gripper_pos / robot_config_.gripper_width * robot_config_.gripper_open_readout;
         double gripper_motor_vel =
@@ -695,9 +759,17 @@ void Arx5ControllerBase::background_send_recv_()
         int start_time_us = get_time_us();
         if (background_send_recv_running_)
         {
-            over_current_protection_();
-            check_joint_state_sanity_();
-            send_recv_();
+            try
+            {
+                over_current_protection_();
+                check_joint_state_sanity_();
+                send_recv_();
+            }
+            catch (const std::exception &error)
+            {
+                logger_->error("Controller cycle failed: {}", error.what());
+                enter_emergency_state_();
+            }
         }
         int elapsed_time_us = get_time_us() - start_time_us;
         int sleep_time_us = int(controller_config_.controller_dt * 1e6) - elapsed_time_us;
