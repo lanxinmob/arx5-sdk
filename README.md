@@ -54,6 +54,64 @@ geometry before autonomous manipulation.
 
 ## ZMQ Communication
 
+### Joint Position Server
+
+From `python/` in the `arx5` environment, replace the Cartesian server with:
+
+```bash
+python communication/zmq_joint_server.py X5 can0 X5 can1 --port 8765 --port 8764
+```
+
+For this dual-arm setup, can0/8765 is the right arm and can1/8764 is the left
+arm. Stop existing controllers on those CAN buses first. The server uses the
+local SDK and the same `gripper_open_readout=-3.37472` calibration as
+`zmq_server.py`. Verify that calibration for each physical arm.
+
+The service binds to localhost by default; use `--bind` for a trusted remote
+client. The SDK protocol uses Python pickle and is not suitable for untrusted
+networks. Each arm is an independent process; this does not synchronize the
+two arms' motion clocks.
+
+| Command | Request data | Reply data |
+| --- | --- | --- |
+| `GET_STATE` | `None` | Existing state fields plus `armed` and `emergency` |
+| `RESET_TO_HOME` | `None` | `"OK"`; moves home, opens gripper, enables joint commands |
+| `SET_JOINT_POS` | `{"joint_pos": six_joint_angles, "gripper_pos": width}` | Robot state |
+| `SET_TO_DAMPING` | `None` | `"OK"`; disables joint commands |
+
+Angles are absolute ARX5 joint positions in radians, in SDK motor order;
+gripper width is in meters (0 closed, SDK `gripper_width` fully open).
+This endpoint takes one target, not a trajectory chunk. Errors return
+`{"cmd": original_command, "data": "ERROR: ..."}` and do not accept the target.
+
+The existing client now supports `set_joint_pos`:
+
+```python
+from communication.zmq_client import Arx5Client
+
+right = Arx5Client("127.0.0.1", 8765)
+right.reset_to_home()  # Moves the arm and opens the gripper.
+state = right.get_state()
+right.set_joint_pos(state["joint_pos"], state["gripper_pos"])
+```
+
+Send targets continuously after reset. By default, 2 seconds without an
+accepted joint target switches to damping and requires another explicit reset.
+`GET_STATE` and rejected commands do not refresh this deadline. Damping is not
+a position hold or power removal; an unsupported X5 may settle under gravity.
+Shutdown also uses SDK damping/passive behavior, never automatic homing.
+
+Targets must be finite and inside SDK joint/gripper limits. Defaults reject
+changes exceeding 0.1 rad per joint or 0.005 m gripper width, relative to both
+measured state and the previous accepted target. Targets use a 0.1 s SDK linear
+interpolation horizon, with additional delta limits based on SDK velocity
+limits. These checks are not collision avoidance or a full trajectory safety
+guarantee. Use `--help` for `--timeout`, `--duration`, and step limits.
+
+ALOHA joint outputs still need an explicitly validated mapping to ARX5 motor
+order, signs, offsets and gripper units. A 14-dimensional dual-arm array alone
+does not establish that compatibility.
+
 From the `python/` directory, start one arm with the default port 8765:
 
 ```bash
