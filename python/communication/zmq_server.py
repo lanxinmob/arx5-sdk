@@ -1,5 +1,7 @@
 import sys
 import os
+import signal
+import subprocess
 import numpy as np
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -252,17 +254,74 @@ class Arx5Server:
         print("Arx5ZmqServer is terminated")
 
 
+def run_servers(arms, ports, bind):
+    if len(arms) == 1:
+        model, interface = arms[0]
+        server = Arx5Server(
+            model=model, interface=interface, zmq_ip=bind, zmq_port=ports[0]
+        )
+        server.run()
+        return
+
+    processes = []
+    try:
+        for (model, interface), port in zip(arms, ports):
+            print(f"Starting {model} on {interface} at {bind}:{port}", flush=True)
+            processes.append(subprocess.Popen(
+                [sys.executable, "-u", os.path.abspath(__file__), model, interface,
+                 "--bind", bind, "--port", str(port)],
+                start_new_session=True,
+            ))
+        while True:
+            for process, (_, interface) in zip(processes, arms):
+                code = process.poll()
+                if code is not None:
+                    raise click.ClickException(
+                        f"Server for {interface} exited with code {code}; stopping all servers."
+                    )
+            time.sleep(0.1)
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+        deadline = time.monotonic() + 5.0
+        for process in processes:
+            try:
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
 @click.command()
-@click.argument("model")  # ARX arm model: X5 or L5
-@click.argument("interface")  # can bus name (can0 etc.)
-def main(model: str, interface: str):
-    server = Arx5Server(
-        model=model,
-        interface=interface,
-        zmq_ip="0.0.0.0",
-        zmq_port=8765,
-    )
-    server.run()
+@click.argument("arms", nargs=-1, required=True, metavar="MODEL INTERFACE [MODEL INTERFACE]...")
+@click.option("--port", "ports", multiple=True, type=click.IntRange(1, 65535),
+              help="Repeat once per arm, in argument order. Defaults to 8765 for one arm.")
+@click.option("--bind", default="0.0.0.0", show_default=True)
+def main(arms, ports, bind):
+    """Serve one or more arms, each on its own TCP port."""
+    if len(arms) % 2:
+        raise click.UsageError("Provide MODEL INTERFACE pairs for each arm.")
+    pairs = list(zip(arms[::2], arms[1::2]))
+    if not ports and len(pairs) == 1:
+        ports = (8765,)
+    if len(ports) != len(pairs):
+        raise click.UsageError("Provide one --port per arm.")
+    if len(set(ports)) != len(ports):
+        raise click.UsageError("Each arm must use a different port.")
+    if len(set(arms[1::2])) != len(pairs):
+        raise click.UsageError("Each arm must use a different CAN interface.")
+
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+
+    previous_handler = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        run_servers(pairs, ports, bind)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
 
 
 if __name__ == "__main__":

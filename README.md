@@ -52,6 +52,44 @@ SDK state timestamps alone do not prove fresh motor feedback. Keep a physical
 stop available and validate telemetry freshness, tracking and workspace
 geometry before autonomous manipulation.
 
+## ZMQ Communication
+
+From the `python/` directory, start one arm with the default port 8765:
+
+```bash
+python communication/zmq_server.py X5 can0
+```
+
+Start multiple arms with one command. Repeat `--port` once per arm; ports
+correspond to the `MODEL INTERFACE` pairs in order:
+
+```bash
+python communication/zmq_server.py X5 can0 X5 can1 --port 8765 --port 8766
+```
+
+Use the actual model for each arm (for example, `X5_umi`). Duplicate ports
+and CAN interfaces are rejected. The default bind address is `0.0.0.0`;
+add `--bind 127.0.0.1` for local connections only. Each arm runs in a separate
+child process. Ctrl+C or SIGTERM stops all children; if any child exits,
+the launcher stops the others and reports an error.
+
+One policy process can connect to both arms:
+
+```python
+from communication.zmq_client import Arx5Client
+
+left = Arx5Client("127.0.0.1", 8765)   # can0
+right = Arx5Client("127.0.0.1", 8766)  # can1
+```
+
+For a remote policy, replace `127.0.0.1` with the robot host's IP address.
+Read state and send each arm's action through its corresponding client.
+Calls are blocking request/reply operations; separate ports do not guarantee
+synchronized execution. The existing protocol requires `reset_to_home()`
+before pose commands; this moves the arm and opens its gripper.
+These launcher options apply to `zmq_server.py`; the guarded
+`zmq_server_agent_safe.py` remains a separate single-arm entry point.
+
 ## Safety-Related Configs
 
  - The safety checks in this controller are implemented through joint position, velocity, and torque limits. However, there is a trade-off between safety and reactiveness when setting these limits. To achieve a reasonable precision for our experiements, **the default values are insufficient to guarantee safety when the robot is close to singularity or the input control signal includes a lot of noise**.
