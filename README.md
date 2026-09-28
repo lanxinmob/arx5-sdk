@@ -58,6 +58,36 @@ geometry before autonomous manipulation.
 
 ## ZMQ Communication
 
+### Quest VR Connection Diagnostics
+
+The ARX VR APK uses Unity ROS-TCP, not the ZMQ joint protocol. The inspected
+`ARX_VR.apk` has a serialized `ROSConnection` destination of
+`192.168.31.137:10000`; the PC must be reachable at that address unless the
+APK configuration has been changed. Sharing Wi-Fi alone is insufficient.
+
+From `python/`, run the standard-library-only diagnostic receiver:
+
+```bash
+python communication/vr_receiver.py
+```
+
+Open the APK on Quest. Look for `Connected`, `__publish` registrations, and
+increasing message counts for `arx5_pos_cmdL` and `arx5_pos_cmdR` (possibly
+with leading slashes). The output includes the advertised message type and
+up to 128 payload bytes in hex, at most once per second per topic. Use Ctrl+C
+to stop. It listens on all IPv4 interfaces at port 10000; use only on a
+trusted LAN. A connection idle for 15 seconds is closed and may reconnect.
+The default handshake advertises ROS1; use `--protocol ROS2` only for an APK
+built for ROS2. This is a diagnostic subset of the
+[Unity ROS-TCP protocol](https://github.com/Unity-Technologies/ROS-TCP-Endpoint),
+not a ROS node; it does not provide subscriptions or services.
+
+This receiver never opens CAN, connects to ZMQ, resets, or moves the arms.
+It is **not yet a motion bridge**. Actual teleoperation requires confirming
+the received message schema, pose frames, units, gripper and button semantics,
+then implementing IK and bounded joint targets for the two ZMQ services.
+Do not interpret raw VR pose values as joint positions.
+
 ### Joint Position Server
 
 From `python/` in the `arx5` environment, replace the Cartesian server with:
