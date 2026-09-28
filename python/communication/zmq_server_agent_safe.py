@@ -93,11 +93,14 @@ class Arx5AgentSafeServer:
 
     def _state_data(self) -> dict[str, Any]:
         eef_state = self.controller.get_eef_state()
+        eef_cmd = self.controller.get_eef_cmd()
         joint_state = self.controller.get_joint_state()
         return {
             "emergency": self.controller.is_emergency(),
             "timestamp": eef_state.timestamp,
             "ee_pose": eef_state.pose_6d().copy(),
+            "ee_cmd_pose": eef_cmd.pose_6d().copy(),
+            "gripper_cmd_pos": eef_cmd.gripper_pos,
             "joint_pos": joint_state.pos().copy(),
             "joint_vel": joint_state.vel().copy(),
             "joint_torque": joint_state.torque().copy(),

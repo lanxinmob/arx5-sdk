@@ -33,6 +33,10 @@ The printed module must be the `.so` under this repository's `python/`, not
 the older installed wheel. Eigen 5 is ABI-incompatible with the prebuilt
 solver. The guarded server selects the local module and refuses an unpatched
 one; its `GET_STATE` response includes `emergency`.
+Cartesian ZMQ servers also return `ee_cmd_pose` and `gripper_cmd_pos` alongside
+the measured pose and gripper state. UMI clients use the command values after
+`RESET_TO_HOME` to initialize their hold target against the guarded server's
+command limit.
 
 The task arm here is `X5_umi / can0`; `can1` is the demonstration arm. Start
 `python/communication/zmq_server_agent_safe.py X5_umi can0` with measured

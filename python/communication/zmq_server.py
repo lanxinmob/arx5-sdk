@@ -108,6 +108,8 @@ class Arx5Server:
                         "data": {
                             "timestamp": eef_state.timestamp,
                             "ee_pose": eef_state.pose_6d().copy(),
+                            "ee_cmd_pose": eef_pose_cmd.pose_6d().copy(),
+                            "gripper_cmd_pos": eef_pose_cmd.gripper_pos,
                             "joint_pos": low_state.pos().copy(),
                             "joint_vel": low_state.vel().copy(),
                             "joint_torque": low_state.torque().copy(),
