@@ -112,7 +112,9 @@ python communication/vr_joint_bridge.py
 ```
 
 Reopen the Quest APK. The bridge waits up to 60 seconds for both `ARX_VR_R`
-and `ARX_VR_L`. Right maps to localhost:8765/can0; left to localhost:8764/can1.
+and `ARX_VR_L`. Quest may send pose frames before its publisher registrations
+on reconnect; those early frames are discarded until the type is registered.
+Right maps to localhost:8765/can0; left to localhost:8764/can1.
 The preview queries both servers with `GET_STATE`, then simulates joint targets
 from their initial states. It does not reset, command or damp the arms. Inspect
 `target_pose`, `joint_pos`, `gripper_m` and `status` while moving each controller.

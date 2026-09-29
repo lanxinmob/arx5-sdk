@@ -92,13 +92,23 @@ class Inputs:
         self.protocol, self.timeout = protocol, timeout
         self.lock = threading.Lock()
         self.samples = {}
+        self.waiting_registration = set()
 
     def receive(self, topic, message_type, payload):
         side = {"ARX_VR_R": "right", "ARX_VR_L": "left"}.get(topic.lstrip("/"))
         if side is None:
             return
+        # Quest can queue pose frames ahead of __publish when reconnecting.
+        if message_type is None:
+            if side not in self.waiting_registration:
+                print(f"{side}: waiting for publisher registration; discarding early frames", flush=True)
+                self.waiting_registration.add(side)
+            return
         if message_type != "arm_control/PosCmd":
-            raise ValueError(f"{side}: expected registered arm_control/PosCmd")
+            raise ValueError(f"{side}: expected arm_control/PosCmd, got {message_type!r}")
+        if side in self.waiting_registration:
+            print(f"{side}: publisher registered as {message_type}", flush=True)
+            self.waiting_registration.remove(side)
         data = decode_pos_cmd(payload, self.protocol)
         pose = vector([data[key] for key in POSE_FIELDS], 6)
         gripper, counter = data["gripper"], data["time_count"]
