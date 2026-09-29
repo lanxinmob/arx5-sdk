@@ -136,6 +136,8 @@ def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, dur
     robot = sdk.RobotConfigFactory.get_instance().get_config(model)
     robot.gripper_open_readout = -3.37472  # Same calibration as zmq_server.py.
     config = sdk.ControllerConfigFactory.get_instance().get_config("joint_controller", robot.joint_dof)
+    # Match the teleop follower: position tracking with gravity feedforward.
+    config.gravity_compensation = True
     controller = None
     with zmq.Context() as context:
         with context.socket(zmq.REP) as socket:

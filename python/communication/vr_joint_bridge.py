@@ -390,14 +390,14 @@ def parse_args():
                             metavar=("ROLL", "PITCH", "YAW"), help="VR-to-base rotation in degrees.")
     parser.add_argument("--scale", type=float, default=0.2, help="Translation scale, (0, 1].")
     parser.add_argument("--rotation-scale", type=float, default=0, help="Orientation scale, [0, 1]; 0 holds orientation.")
-    parser.add_argument("--speed", type=float, default=0.02, help="Cartesian speed cap, m/s (max 0.05).")
-    parser.add_argument("--joint-speed", type=float, default=0.15, help="Joint speed cap, rad/s (max 0.3).")
+    parser.add_argument("--speed", type=float, default=0.02, help="Cartesian speed cap, m/s (max 0.5).")
+    parser.add_argument("--joint-speed", type=float, default=0.15, help="Joint speed cap, rad/s (max 1; also bounded by model limits).")
     parser.add_argument("--radius", type=float, default=0.08, help="Radius around startup FK position, meters (max 0.15).")
     parser.add_argument("--input-timeout", type=float, default=0.3,
                         help="Fresh-packet deadline in seconds; preview waits, execute stops.")
     parser.add_argument("--hold-timeout", type=float, default=0.1)
     args = parser.parse_args()
-    for name, upper in (("scale", 1), ("speed", 0.05), ("joint_speed", 0.3),
+    for name, upper in (("scale", 1), ("speed", 0.5), ("joint_speed", 1),
                         ("radius", 0.15), ("input_timeout", 0.5), ("hold_timeout", 0.2)):
         if not 0 < getattr(args, name) <= upper:
             parser.error(f"{name} must be in (0, {upper}]")

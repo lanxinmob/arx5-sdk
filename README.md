@@ -162,6 +162,17 @@ current VR poses to the measured arm poses. Initial VR absolute coordinates
 are not sent to the robot. Homing follows the server/SDK reset behavior, not
 the bridge's tracking speed limits; homing RPCs have a 30-second timeout.
 
+For a higher tracking cap, use `--speed 0.2 --joint-speed 1`
+(0.2 m/s and 1 rad/s). Configurable maxima are 0.5 m/s and 1 rad/s; model
+joint velocity limits, server step limits and tracking-error checks still
+apply, so these are caps, not guaranteed achieved speeds. Increasing speed
+does not enlarge the workspace or resolve IK joint-limit rejections.
+The joint server explicitly enables gravity compensation, like the follower
+in `python/examples/leader_follower_teleop.py`, while retaining position gains.
+The example's zero-kp drag mode is for the hand-guided leader; applying it to
+the VR follower would remove position tracking. Restart the joint servers
+to load server configuration changes.
+
 Default translation is 0.2 times the VR displacement, with identity VR-to-base
 axis mapping. Tracking caps are 0.02 m/s Cartesian, 0.15 rad/s per joint, and
 0.01 m/s gripper, at at most 50 commands/s per arm. A target more than 0.08 m
