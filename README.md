@@ -128,9 +128,13 @@ numbers (1-based), candidate angles and allowed bounds in radians. Move the
 controller back toward a reachable pose to resume tracking. No joint limits
 are widened and the invalid solution is never sent or clipped into range.
 Measured-state limit violations, tracking faults and stale execute inputs
-still stop the session. Tracking faults report each joint error in radians
-and the gripper error in meters. `tracking (FK step reduced)` means joint
-interpolation exceeded a Cartesian speed cap and the step was shortened;
+still stop the session. Execute targets pause or slow when any joint target is
+0.04 rad ahead of measured feedback; the existing 0.07 rad tracking-error stop
+remains. `holding (robot catching up)` and `tracking (feedback limited)` report
+this behavior. Tracking faults include the current VR counter/pose and actual
+and target joint positions, so an input change between one-second diagnostics
+and STOP can be distinguished from hardware drift. `tracking (FK step reduced)`
+means joint interpolation exceeded a Cartesian speed cap and the step was shortened;
 the planner retries up to 12 halvings before holding the previous target.
 A posture near a joint limit can have very little
 Cartesian travel in some directions, even with small VR displacements.

@@ -19,6 +19,8 @@ from vr_receiver import decode_pos_cmd, inspect_connection
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 DT = 0.02
+TRACKING_SOFT_LIMIT = 0.04
+TRACKING_HARD_LIMIT = 0.07
 POSE_FIELDS = ("x", "y", "z", "roll", "pitch", "yaw")
 
 
@@ -197,12 +199,19 @@ class Planner:
             actual, grip = self.check_state(state)
             if not state["armed"]:
                 raise ValueError("Joint server disarmed; restart bridge explicitly")
-            if np.max(np.abs(actual - self.q)) > 0.07 or abs(grip - self.gripper) > 0.004:
-                raise ValueError(
-                    "Robot tracking error exceeded joint/gripper limits: "
-                    f"joint_error_rad={(actual - self.q).round(6).tolist()}, "
-                    f"gripper_error_m={grip - self.gripper:.6f}; "
-                    "limits=0.07 rad / 0.004 m")
+            if np.max(np.abs(actual - self.q)) > TRACKING_HARD_LIMIT or abs(grip - self.gripper) > 0.004:
+                snapshot = {
+                    "last_status": self.status,
+                    "vr_counter": sample.counter,
+                    "vr_packet_age_s": round(time.monotonic() - sample.received, 3),
+                    "vr_counter_age_s": round(time.monotonic() - sample.changed, 3),
+                    "vr_pose": sample.pose.round(6).tolist(),
+                    "actual_joint_pos": actual.round(6).tolist(),
+                    "target_joint_pos": self.q.round(6).tolist(),
+                    "joint_error_rad": (actual - self.q).round(6).tolist(),
+                    "gripper_error_m": round(grip - self.gripper, 6),
+                }
+                raise ValueError(f"Robot tracking error exceeded joint/gripper limits: {json.dumps(snapshot)}")
         desired_gripper = sample.gripper / 5 * self.robot.gripper_width
         gripper_step = min(self.args.gripper_speed, self.robot.gripper_vel_max) * DT
         self.gripper += float(np.clip(desired_gripper - self.gripper, -gripper_step, gripper_step))
@@ -270,6 +279,18 @@ class Planner:
             speed = np.minimum(self.args.joint_speed, self.robot.joint_vel_max)
             ratio = max(1.0, float(np.max(np.abs(delta) / (speed * DT))))
             candidate += delta / ratio
+        if state is not None:
+            step = candidate - self.q
+            fraction = 1.0
+            for i, amount in enumerate(step):
+                if amount > 0:
+                    fraction = min(fraction, (actual[i] + TRACKING_SOFT_LIMIT - self.q[i]) / amount)
+                elif amount < 0:
+                    fraction = min(fraction, (actual[i] - TRACKING_SOFT_LIMIT - self.q[i]) / amount)
+            fraction = max(0.0, fraction)
+            if fraction < 1.0:
+                candidate = self.q + step * fraction
+                self.status = "holding (robot catching up)" if fraction == 0 else "tracking (feedback limited)"
         # Joint interpolation is nonlinear in Cartesian space. Backtrack rather
         # than repeatedly rejecting the same otherwise valid joint direction.
         for attempt in range(13):
