@@ -2,9 +2,31 @@
 
 import argparse
 import json
+import math
 import socket
 import struct
 import time
+
+
+def decode_pos_cmd(payload, protocol):
+    """Decode ARX arm_control/PosCmd: 25 float64 values and nine int32s."""
+    offset, endian = 0, "<"
+    if protocol == "ROS2":
+        if payload[:4] not in (b"\x00\x01\x00\x00", b"\x00\x00\x00\x00"):
+            raise ValueError("Unsupported PosCmd CDR header")
+        offset = 4
+        endian = "<" if payload[1] == 1 else ">"
+    if len(payload) != offset + 236:
+        raise ValueError(f"Expected {offset + 236} PosCmd bytes, got {len(payload)}")
+    values = struct.unpack_from(endian + "25d9i", payload, offset)
+    if not all(math.isfinite(value) for value in values[:25]):
+        raise ValueError("Nonfinite PosCmd float field")
+    names = ("x y z roll pitch yaw gripper quater_x quater_y quater_z quater_w "
+             "chx chy chz vel_l vel_r height head_pit head_yaw").split()
+    result = dict(zip(names, values[:19]))
+    result.update(temp_float_data=values[19:25], temp_int_data=values[25:31],
+                  mode1=values[31], mode2=values[32], time_count=values[33])
+    return result
 
 
 def receive_exact(connection, size):
@@ -76,11 +98,17 @@ def inspect_connection(connection, protocol):
         now = time.monotonic()
         if now - last_print.get(topic, float("-inf")) >= 1:
             last_print[topic] = now
-            print(json.dumps({
+            report = {
                 "topic": topic, "message_type": publishers.get(topic, "unregistered"),
                 "count": counts[topic], "bytes": len(payload),
                 "preview_hex": payload[:128].hex(),
-            }), flush=True)
+            }
+            if publishers.get(topic) == "arm_control/PosCmd":
+                try:
+                    report["pos_cmd"] = decode_pos_cmd(payload, protocol)
+                except ValueError as error:
+                    report["decode_error"] = str(error)
+            print(json.dumps(report), flush=True)
 
 
 def main():

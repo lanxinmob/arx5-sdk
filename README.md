@@ -68,13 +68,18 @@ APK configuration has been changed. Sharing Wi-Fi alone is insufficient.
 From `python/`, run the standard-library-only diagnostic receiver:
 
 ```bash
-python communication/vr_receiver.py
+python communication/vr_receiver.py --protocol ROS2
 ```
 
 Open the APK on Quest. Look for `Connected`, `__publish` registrations, and
-increasing message counts for `arx5_pos_cmdL` and `arx5_pos_cmdR` (possibly
-with leading slashes). The output includes the advertised message type and
-up to 128 payload bytes in hex, at most once per second per topic. Use Ctrl+C
+increasing message counts for `ARX_VR_L` and `ARX_VR_R` (possibly
+with leading slashes), as observed from the APK. Its ROS2 `arm_control/PosCmd`
+messages are 240 bytes: a four-byte CDR header, 25 float64s and nine int32s.
+The receiver displays decoded `pos_cmd` fields, including pose, raw gripper,
+mode1/mode2, temporary arrays and time_count. Gripper values are not SDK meters;
+the observed raw value of 5 must not be passed directly to `set_joint_pos`.
+The output also includes the advertised message type and up to 128 payload
+bytes in hex, at most once per second per topic. Use Ctrl+C
 to stop. It listens on all IPv4 interfaces at port 10000; use only on a
 trusted LAN. A connection idle for 15 seconds is closed and may reconnect.
 The default handshake advertises ROS1; use `--protocol ROS2` only for an APK
