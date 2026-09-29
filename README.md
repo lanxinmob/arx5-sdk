@@ -58,6 +58,76 @@ geometry before autonomous manipulation.
 
 ## ZMQ Communication
 
+### Quest ROS 2 Bring-up (Steps 3-6)
+
+The official ROS 2 `serial_port_node` publishes `arm_control/msg/PosCmd` on
+`/ARX_VR_R` and `/ARX_VR_L`. It reads an ARX USB receiver whose by-id name
+contains `USB_Single_Serial`; the two ARX USB2CAN adapters are not that receiver.
+It never needs an X5 controller process. Do not run the vendor `ARX_VR.sh`,
+which also opens several topic terminals, or `port.sh`, which changes global
+udev permissions.
+
+On this Jazzy host, build the vendor message and serial packages once:
+
+```bash
+sudo apt-get install ros-jazzy-serial-driver ros-jazzy-asio-cmake-module
+cd /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2
+source /opt/ros/jazzy/setup.bash
+env PATH=/usr/bin:/bin /usr/bin/colcon build --packages-up-to serial_port \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+source install/setup.bash
+```
+
+Check that the receiver is connected before starting the vendor node: this
+version of its constructor indexes the device list even when it is empty.
+The user running it must have access to the serial device (usually through
+the `dialout` group). On a new host, run
+`sudo usermod -aG dialout "$USER"` once and log out/in before launching the node.
+
+```bash
+ls /dev/serial/by-id/*USB_Single_Serial*
+ros2 run serial_port serial_port_node
+```
+
+In a second terminal, source the same `install/setup.bash` and inspect the
+right controller first. Move only the Quest controller; leave CAN controllers
+stopped. Confirm that XYZ, RPY and gripper change independently and note their
+units and ranges before interpreting them as robot commands.
+
+```bash
+ros2 topic echo /ARX_VR_R --once
+cd /home/hjadmin/projects/arx5-sdk
+/usr/bin/python3 python/communication/quest_arx5_bridge.py --mode raw
+```
+
+For target preview, build this checkout's patched Stanford SDK for Jazzy's
+Python 3.12. The existing `arx5` environment contains Python 3.9 and its
+module cannot be imported by ROS 2 Jazzy. From this repository root:
+
+```bash
+ARX5_ENV="$HOME/miniconda3/envs/arx5"
+CONDA_PREFIX="$ARX5_ENV" cmake -S . -B build/quest-jazzy \
+  -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+  -DCMAKE_PREFIX_PATH="$ARX5_ENV" -DEigen3_DIR=/usr/share/eigen3/cmake \
+  -DPython3_EXECUTABLE=/usr/bin/python3 -DPYTHON_EXECUTABLE=/usr/bin/python3
+CONDA_PREFIX="$ARX5_ENV" LIBRARY_PATH="$ARX5_ENV/lib" \
+  cmake --build build/quest-jazzy --target arx5_interface -j 4
+LD_LIBRARY_PATH="$ARX5_ENV/lib:$LD_LIBRARY_PATH" PYTHONPATH="$PWD/python:$PYTHONPATH" \
+  /usr/bin/python3 python/communication/quest_arx5_bridge.py --mode target
+```
+
+The preview uses the model's zero-joint FK pose as its starting point, anchors
+the first Quest sample, scales relative XYZ motion, and prints a speed- and
+radius-limited Cartesian target. RPY and gripper targets stay at their home
+values. It holds the target on stale input and reanchors after large position jumps.
+It does not open CAN, reset an arm, or send robot commands. Run with
+`--side left` to inspect the left topic. If the official topic reports XYZ in
+millimeters, add `--input-meters-per-unit 0.001` after confirming it from live
+samples. The frame directions, units, gripper range and trigger behavior must
+be checked from live Quest data before enabling any X5 motion. This version of
+the vendor serial node does not populate `time_count` or a dedicated trigger
+field in either published message, so a constant zero is not a clutch signal.
+
 ### Quest VR Connection Diagnostics
 
 The ARX VR APK uses Unity ROS-TCP, not the ZMQ joint protocol. The inspected
