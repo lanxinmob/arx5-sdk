@@ -31,6 +31,21 @@ def send_command(connection, command, params):
                        + struct.pack("<I", len(payload)) + payload)
 
 
+def parse_command(topic, payload):
+    # Unity's ROS2 WriteUnaligned includes a single NUL in the string length.
+    data = payload[:-1] if payload.endswith(b"\0") else payload
+    try:
+        params = json.loads(data)
+    except (ValueError, UnicodeError) as error:
+        raise ValueError(
+            f"Invalid JSON for {topic!r}: {error}; "
+            f"bytes={len(payload)}, tail_hex={payload[-32:].hex()}"
+        ) from error
+    if not isinstance(params, dict):
+        raise ValueError("System command must contain a JSON object")
+    return params
+
+
 def inspect_connection(connection, protocol):
     # Unity ROS-TCP-Endpoint v0.7.0 uses a JSON string inside metadata.
     send_command(connection, "__handshake", {
@@ -43,9 +58,7 @@ def inspect_connection(connection, protocol):
         if not topic:
             continue
         if topic.startswith("__"):
-            params = json.loads(payload)
-            if not isinstance(params, dict):
-                raise ValueError("System command must contain a JSON object")
+            params = parse_command(topic, payload)
             print(f"{topic}: {params}", flush=True)
             if topic == "__publish":
                 name, message = params.get("topic"), params.get("message_name")
