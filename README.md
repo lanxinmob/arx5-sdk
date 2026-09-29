@@ -120,8 +120,9 @@ The preview queries both servers with `GET_STATE`, then simulates joint targets
 from their initial states. It does not reset, command or damp the arms. Inspect
 `target_pose`, `joint_pos`, `gripper_m` and `status` while moving each controller.
 `IK rejected` means that pose has no accepted local IK solution; it is held.
-`holding (IK joint limit)` also holds the last valid joint and gripper targets,
-in both preview and execute modes, rather than terminating the session.
+`holding (IK joint limit)` holds the last valid arm target, in both preview
+and execute modes, rather than terminating the session. The gripper still
+follows its independent Quest command.
 `ik_rejection` lists the rejected Cartesian target and out-of-range joint
 numbers (1-based), candidate angles and allowed bounds in radians. Move the
 controller back toward a reachable pose to resume tracking. No joint limits
@@ -177,22 +178,45 @@ The example's zero-kp drag mode is for the hand-guided leader; applying it to
 the VR follower would remove position tracking. Restart the joint servers
 to load server configuration changes.
 
-Default translation is 0.2 times the VR displacement, with identity VR-to-base
-axis mapping. Tracking caps are 0.02 m/s Cartesian, 0.15 rad/s per joint, and
-0.01 m/s gripper, at at most 50 commands/s per arm. A target more than 0.08 m
-from the startup position stops the session. Orientation is held by default;
-add `--rotation-scale 0.2` to follow relative rotations after verifying them.
-RPY is interpreted as radians with `Rz(yaw) Ry(pitch) Rx(roll)`. For differently
-mounted arms, `--right-frame-rpy R P Y` and `--left-frame-rpy R P Y` rotate the
-VR displacement and relative rotation into each base frame (arguments in
-degrees). Physical axis and scale validation is still required on your setup.
+For can0=`X5_umi` and can1=`X5`, verify the new pose mapping without motion:
+
+```bash
+python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5 --scale 0.2 --rotation-scale 1 --speed 0.2 --joint-speed 1 --radius 0.15
+```
+
+Only add `--execute` after checking translation and rotation directions in
+preview. This mode homes both arms before tracking.
+
+The controller pose at alignment is the VR origin; the measured end-effector
+pose is the robot origin. Each update applies the controller's relative rigid
+transform to that end-effector pose: `T_eef = T_eef0 * F *
+(T_vr0^-1 * T_vr) * F^-1`, where `F` is the controller-to-tool axis rotation.
+Translation and relative rotation can be scaled with `--scale` and
+`--rotation-scale`; the formula above uses both at 1. Defaults are 0.2 for
+translation and 0 for rotation; pass `--rotation-scale 1` to follow the complete
+relative controller orientation. Position and orientation rebase when tracking
+resumes after a hold, so hand movement during a hold is discarded. The default
+axis calibration is the identity; `--right-frame-rpy R P Y` and
+`--left-frame-rpy R P Y` rotate the controller's local axes into each tool's
+local axes (degrees). Verify the actual axis directions in preview before
+execution. RPY values are in radians and use `Rz(yaw) Ry(pitch) Rx(roll)`.
+
+Tracking caps default to 0.02 m/s translation, 0.8 rad/s rotation, 0.15 rad/s
+per joint, and 0.08 m/s gripper width, at most 50 commands/s per arm. A
+target more than 0.08 m from the startup position stops the session unless
+`--radius` sets a larger boundary (maximum 0.15 m). `--angular-speed` controls
+the orientation speed cap; `--gripper-speed` changes the gripper width speed cap.
 
 Gripper raw 5 means fully open, 0 closed: width is `raw / 5 * gripper_width`
-from the selected SDK model. Use `--right-model` / `--left-model` if not X5.
-Both `mode` fields and the zero quaternion are ignored. If `time_count` stops
-changing for 0.1 s, the bridge holds the last joint/gripper target and rebases
-on resumed updates, discarding accumulated motion. This is an observed counter
-heuristic, not a verified deadman switch; tracking loss can look like a hold.
+from the selected SDK model. The APK's side trigger changes this scalar; the
+bridge follows its current value independently of arm IK or pose hold, subject
+to the gripper speed cap. It has no verified separate open/close button bits.
+Use `--right-model` / `--left-model` if not X5. Both `mode` fields and the zero
+quaternion are ignored. If `time_count` stops changing for 0.1 s, the bridge
+holds the last arm target and rebases on resumed updates, discarding accumulated
+arm motion. The gripper still responds to its scalar target. This is an
+observed counter heuristic, not a verified deadman switch; tracking loss can
+look like a hold.
 
 In execute mode, missing packets on either topic for 0.3 s, disconnection,
 counter reset, large pose jumps, tracking error, rejected ZMQ commands, or

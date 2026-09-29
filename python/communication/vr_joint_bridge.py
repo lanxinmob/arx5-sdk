@@ -37,6 +37,19 @@ def rotation(pose):
     return Rotation.from_euler("xyz", pose[3:])
 
 
+def mapped_pose(anchor_eef, anchor_vr, current_vr, frame, scale, rotation_scale):
+    """Apply the controller transform since alignment in the EEF local frame."""
+    vr_origin = rotation(anchor_vr)
+    eef_axes = rotation(anchor_eef) * frame
+    relative_position = vr_origin.inv().apply(current_vr[:3] - anchor_vr[:3])
+    relative_rotation = vr_origin.inv() * rotation(current_vr)
+    target = anchor_eef.copy()
+    target[:3] += scale * eef_axes.apply(relative_position)
+    target[3:] = (eef_axes * Rotation.from_rotvec(
+        relative_rotation.as_rotvec() * rotation_scale) * frame.inv()).as_euler("xyz")
+    return target
+
+
 class JointClient:
     """Each worker owns its REQ socket; failed requests are never retried."""
 
@@ -190,6 +203,9 @@ class Planner:
                     f"joint_error_rad={(actual - self.q).round(6).tolist()}, "
                     f"gripper_error_m={grip - self.gripper:.6f}; "
                     "limits=0.07 rad / 0.004 m")
+        desired_gripper = sample.gripper / 5 * self.robot.gripper_width
+        gripper_step = min(self.args.gripper_speed, self.robot.gripper_vel_max) * DT
+        self.gripper += float(np.clip(desired_gripper - self.gripper, -gripper_step, gripper_step))
         now = time.monotonic()
         if sample.generation != self.previous.generation:
             if self.args.execute:
@@ -218,17 +234,13 @@ class Planner:
                 self.status = "preview realigned (VR jump discarded)"
                 return self.q.copy(), self.gripper
         self.previous = sample
-        target = self.anchor_pose.copy()
-        target[:3] += self.args.scale * self.frame.apply(sample.pose[:3] - self.anchor_vr[:3])
-        relative = rotation(sample.pose) * rotation(self.anchor_vr).inv()
-        relative = self.frame * relative * self.frame.inv()
-        desired_rotation = (Rotation.from_rotvec(relative.as_rotvec() * self.args.rotation_scale)
-                            * rotation(self.anchor_pose))
+        target = mapped_pose(self.anchor_pose, self.anchor_vr, sample.pose, self.frame,
+                             self.args.scale, self.args.rotation_scale)
         if np.linalg.norm(target[:3] - self.origin) > self.args.radius:
             raise ValueError("Target exceeds startup workspace radius; restart to realign")
         target[:3] = self.pose[:3] + limited(target[:3] - self.pose[:3], self.args.speed * DT)
-        delta_rot = (desired_rotation * rotation(self.pose).inv()).as_rotvec()
-        target[3:] = (Rotation.from_rotvec(limited(delta_rot, 0.2 * DT))
+        delta_rot = (rotation(target) * rotation(self.pose).inv()).as_rotvec()
+        target[3:] = (Rotation.from_rotvec(limited(delta_rot, self.args.angular_speed * DT))
                       * rotation(self.pose)).as_euler("xyz")
         candidate = self.q.copy()
         self.status = "tracking"
@@ -263,7 +275,7 @@ class Planner:
         for attempt in range(13):
             pose = vector(self.solver.forward_kinematics(candidate), 6)
             if (np.linalg.norm(pose[:3] - self.pose[:3]) <= self.args.speed * DT * 1.1 + 1e-6
-                    and (rotation(pose) * rotation(self.pose).inv()).magnitude() <= 0.2 * DT * 1.1 + 1e-6):
+                    and (rotation(pose) * rotation(self.pose).inv()).magnitude() <= self.args.angular_speed * DT * 1.1 + 1e-6):
                 if attempt:
                     self.status = "tracking (FK step reduced)"
                 break
@@ -273,10 +285,8 @@ class Planner:
             return self.q.copy(), self.gripper
         if np.linalg.norm(pose[:3] - self.origin) > self.args.radius:
             raise ValueError("FK target outside startup workspace radius")
-        desired_gripper = sample.gripper / 5 * self.robot.gripper_width
-        gripper = self.gripper + float(np.clip(desired_gripper - self.gripper, -0.01 * DT, 0.01 * DT))
-        self.q, self.pose, self.gripper = candidate, pose, gripper
-        return candidate.copy(), gripper
+        self.q, self.pose = candidate, pose
+        return candidate.copy(), self.gripper
 
 
 def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
@@ -398,17 +408,22 @@ def parse_args():
         parser.add_argument(f"--{side}-port", type=int, default=port)
         parser.add_argument(f"--{side}-model", default="X5")
         parser.add_argument(f"--{side}-frame-rpy", nargs=3, type=float, default=(0, 0, 0),
-                            metavar=("ROLL", "PITCH", "YAW"), help="VR-to-base rotation in degrees.")
+                            metavar=("ROLL", "PITCH", "YAW"),
+                            help="Controller-local to EEF-local axis rotation in degrees.")
     parser.add_argument("--scale", type=float, default=0.2, help="Translation scale, (0, 1].")
-    parser.add_argument("--rotation-scale", type=float, default=0, help="Orientation scale, [0, 1]; 0 holds orientation.")
+    parser.add_argument("--rotation-scale", type=float, default=0,
+                        help="Scale controller relative rotation in the EEF frame; 0 holds orientation.")
     parser.add_argument("--speed", type=float, default=0.02, help="Cartesian speed cap, m/s (max 0.5).")
+    parser.add_argument("--angular-speed", type=float, default=0.8, help="EEF angular speed cap, rad/s (max 1.8).")
     parser.add_argument("--joint-speed", type=float, default=0.15, help="Joint speed cap, rad/s (max 1; also bounded by model limits).")
+    parser.add_argument("--gripper-speed", type=float, default=0.08, help="Gripper width speed cap, m/s (max 0.15).")
     parser.add_argument("--radius", type=float, default=0.08, help="Radius around startup FK position, meters (max 0.15).")
     parser.add_argument("--input-timeout", type=float, default=0.3,
                         help="Fresh-packet deadline in seconds; preview waits, execute stops.")
     parser.add_argument("--hold-timeout", type=float, default=0.1)
     args = parser.parse_args()
-    for name, upper in (("scale", 1), ("speed", 0.5), ("joint_speed", 1),
+    for name, upper in (("scale", 1), ("speed", 0.5), ("angular_speed", 1.8),
+                        ("joint_speed", 1), ("gripper_speed", 0.15),
                         ("radius", 0.15), ("input_timeout", 0.5), ("hold_timeout", 0.2)):
         if not 0 < getattr(args, name) <= upper:
             parser.error(f"{name} must be in (0, {upper}]")
