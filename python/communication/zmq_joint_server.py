@@ -17,16 +17,20 @@ sys.path.insert(0, str(ROOT))
 
 class JointServer:
     def __init__(self, sdk, controller, robot, *, timeout=2.0, max_step=0.1,
-                 max_gripper_step=0.005, duration=0.1):
+                 max_gripper_step=0.005, duration=0.1, timeout_action="damping"):
         for value in (timeout, max_step, max_gripper_step, duration):
             if not np.isfinite(value) or value <= 0:
                 raise ValueError("Timeout, limits and duration must be positive and finite")
         if duration >= timeout:
             raise ValueError("Duration must be shorter than timeout")
+        if timeout_action not in ("damping", "hold"):
+            raise ValueError("Timeout action must be damping or hold")
         self.sdk, self.controller, self.robot = sdk, controller, robot
         self.timeout, self.max_step = timeout, max_step
         self.max_gripper_step, self.duration = max_gripper_step, duration
+        self.timeout_action = timeout_action
         self.armed = False
+        self.holding = False
         self.last_action = 0.0
         self.last_target = None
 
@@ -39,17 +43,52 @@ class JointServer:
             joint_torque=joint.torque().copy(), gripper_pos=joint.gripper_pos,
             gripper_vel=joint.gripper_vel, gripper_torque=joint.gripper_torque,
             emergency=self.controller.is_emergency(), armed=self.armed,
+            holding=self.holding, timeout_action=self.timeout_action,
         )
 
     def disarm(self):
         self.armed = False
+        self.holding = False
         self.last_target = None
         self.controller.set_to_damping()
 
+    def hold_position(self):
+        if self.controller.is_emergency():
+            raise ValueError("Cannot hold an emergency controller")
+        if self.holding:
+            return
+        if not self.armed:
+            raise ValueError("Cannot hold an unarmed controller")
+        state = self.controller.get_joint_state()
+        position = np.asarray(state.pos(), dtype=float).copy()
+        gripper = float(state.gripper_pos)
+        if (position.shape != (self.robot.joint_dof,) or not np.isfinite(position).all()
+                or np.any(position < self.robot.joint_pos_min)
+                or np.any(position > self.robot.joint_pos_max)
+                or not np.isfinite(gripper) or not 0 <= gripper <= self.robot.gripper_width):
+            raise ValueError("Cannot hold invalid measured joint or gripper position")
+        command = self.sdk.JointState(self.robot.joint_dof)
+        command.pos()[:] = position
+        command.gripper_pos = gripper
+        command.timestamp = self.controller.get_timestamp() + self.duration
+        self.controller.set_joint_cmd(command)
+        self.armed = False
+        self.holding = True
+        self.last_target = None
+
     def check_timeout(self):
-        if self.armed and (self.controller.is_emergency()
-                           or time.monotonic() - self.last_action >= self.timeout):
-            self.disarm()
+        if self.controller.is_emergency():
+            if self.armed or self.holding:
+                self.disarm()
+        elif self.armed and time.monotonic() - self.last_action >= self.timeout:
+            if self.timeout_action == "damping":
+                self.disarm()
+            else:
+                try:
+                    self.hold_position()
+                except Exception as error:
+                    self.disarm()
+                    raise RuntimeError(f"Timeout position hold failed: {error}") from error
 
     def set_position(self, data):
         if not self.armed:
@@ -100,6 +139,7 @@ class JointServer:
                 data = self.state()
             elif cmd == "RESET_TO_HOME":
                 self.armed = False
+                self.holding = False
                 self.last_target = None
                 self.controller.reset_to_home()
                 if self.controller.is_emergency():
@@ -111,6 +151,14 @@ class JointServer:
                 data = "OK"
             elif cmd == "SET_TO_DAMPING":
                 self.disarm()
+                data = "OK"
+            elif cmd == "HOLD_POSITION":
+                try:
+                    self.hold_position()
+                except Exception:
+                    if self.armed:
+                        self.disarm()
+                    raise
                 data = "OK"
             elif cmd == "SET_JOINT_POS":
                 data = self.set_position(message.get("data"))
@@ -126,7 +174,7 @@ class JointServer:
             return {"cmd": cmd, "data": f"ERROR: {error}"}
 
 
-def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, duration):
+def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, duration, timeout_action):
     # SDK URDF paths are relative to python/.
     os.chdir(ROOT)
     import arx5_interface as sdk
@@ -146,7 +194,8 @@ def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, dur
             try:
                 controller = sdk.Arx5JointController(robot, config, interface)
                 server = JointServer(sdk, controller, robot, timeout=timeout, max_step=max_step,
-                                     max_gripper_step=max_gripper_step, duration=duration)
+                                     max_gripper_step=max_gripper_step, duration=duration,
+                                     timeout_action=timeout_action)
                 print(f"Joint server: {model} {interface} at {bind}:{port}; awaiting RESET_TO_HOME", flush=True)
                 while True:
                     server.check_timeout()
@@ -167,10 +216,13 @@ def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, dur
 @click.option("--port", "ports", multiple=True, type=click.IntRange(1, 65535))
 @click.option("--bind", default="127.0.0.1", show_default=True)
 @click.option("--timeout", default=2.0, type=float, show_default=True)
+@click.option("--timeout-action", type=click.Choice(("damping", "hold")),
+              default="damping", show_default=True,
+              help="Action after accepted joint commands stop arriving.")
 @click.option("--max-step", default=0.1, type=float, show_default=True, help="Maximum joint target delta, radians.")
 @click.option("--max-gripper-step", default=0.005, type=float, show_default=True, help="Maximum gripper target delta, meters.")
 @click.option("--duration", default=0.1, type=float, show_default=True, help="SDK interpolation horizon, seconds.")
-def main(arms, ports, bind, timeout, max_step, max_gripper_step, duration):
+def main(arms, ports, bind, timeout, timeout_action, max_step, max_gripper_step, duration):
     """Run one independent joint-position service per arm."""
     if len(arms) % 2:
         raise click.UsageError("Provide MODEL INTERFACE pairs")
@@ -191,14 +243,15 @@ def main(arms, ports, bind, timeout, max_step, max_gripper_step, duration):
     children = []
     try:
         if len(pairs) == 1:
-            serve(*pairs[0], ports[0], bind, timeout, max_step, max_gripper_step, duration)
+            serve(*pairs[0], ports[0], bind, timeout, max_step, max_gripper_step, duration,
+                  timeout_action)
         else:
             for (model, interface), port in zip(pairs, ports):
                 children.append(subprocess.Popen([
                     sys.executable, "-u", str(Path(__file__).resolve()), model, interface,
                     "--port", str(port), "--bind", bind, "--timeout", str(timeout),
                     "--max-step", str(max_step), "--max-gripper-step", str(max_gripper_step),
-                    "--duration", str(duration),
+                    "--duration", str(duration), "--timeout-action", timeout_action,
                 ], start_new_session=True))
             while True:
                 for child in children:
