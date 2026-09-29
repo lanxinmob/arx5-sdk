@@ -315,10 +315,15 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                 state = client.request("SET_JOINT_POS", {"joint_pos": q, "gripper_pos": grip})
             if tick - last_print >= 1:
                 last_print = tick
+                latest = inputs.get(side, require_fresh=False)
+                diagnostic_time = time.monotonic()
                 print(json.dumps({"arm": side, "execute": args.execute,
                                   "status": planner.status,
-                                  "vr_packet_age_s": round(time.monotonic() - inputs.get(side, False).received, 3),
-                                  "vr_counter": inputs.get(side, False).counter,
+                                  "vr_packet_age_s": round(diagnostic_time - latest.received, 3),
+                                  "vr_counter": latest.counter,
+                                  "vr_counter_age_s": round(diagnostic_time - latest.changed, 3),
+                                  "vr_pose": latest.pose.round(6).tolist(),
+                                  "vr_gripper_raw": round(latest.gripper, 6),
                                   "last_input_jump": planner.last_input_jump,
                                   "ik_rejection": planner.ik_rejection,
                                   "target_pose": planner.pose.round(5).tolist(),

@@ -139,6 +139,10 @@ returns. It also accepts Quest reconnections without restarting the process.
 TCP receive pauses preserve partially received frames, including their length
 headers. `vr_packet_age_s` shows how long since the last valid pose packet;
 `vr_counter` can remain constant while stationary packets keep arriving.
+`vr_pose` and `vr_gripper_raw` show the received input before mapping and IK;
+`vr_counter_age_s` measures how long the counter has remained unchanged.
+If inputs change while the counter is frozen, the counter-based hold heuristic
+needs further validation; do not infer button state from the counter alone.
 
 After checking axis directions, clear the arms' homing paths, release the
 gripper triggers and stop the preview. To move the arms, explicitly run:
