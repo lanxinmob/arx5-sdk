@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 DT = 0.02
 TRACKING_SOFT_LIMIT = 0.04
 TRACKING_HARD_LIMIT = 0.07
+GRIPPER_SOFT_LIMIT = 0.002
 POSE_FIELDS = ("x", "y", "z", "roll", "pitch", "yaw")
 
 
@@ -176,6 +177,10 @@ class Planner:
         self.status = "aligned"
         self.last_input_jump = None
         self.ik_rejection = None
+        self.workspace_clamped = False
+
+    def reanchor(self, sample):
+        self.anchor_pose, self.anchor_vr = self.pose.copy(), sample.pose.copy()
 
     def check_state(self, state):
         if state.get("emergency") is not False or not isinstance(state.get("armed"), bool):
@@ -195,6 +200,7 @@ class Planner:
 
     def step(self, sample, state=None):
         self.ik_rejection = None
+        self.workspace_clamped = False
         if state is not None:
             actual, grip = self.check_state(state)
             if not state["armed"]:
@@ -213,6 +219,9 @@ class Planner:
                 }
                 raise ValueError(f"Robot tracking error exceeded joint/gripper limits: {json.dumps(snapshot)}")
         desired_gripper = sample.gripper / 5 * self.robot.gripper_width
+        if state is not None:
+            desired_gripper = float(np.clip(desired_gripper, grip - GRIPPER_SOFT_LIMIT,
+                                            grip + GRIPPER_SOFT_LIMIT))
         gripper_step = min(self.args.gripper_speed, self.robot.gripper_vel_max) * DT
         self.gripper += float(np.clip(desired_gripper - self.gripper, -gripper_step, gripper_step))
         now = time.monotonic()
@@ -224,7 +233,7 @@ class Planner:
             self.holding, self.status = True, "holding (VR counter unchanged)"
             return self.q.copy(), self.gripper
         if self.holding:
-            self.anchor_pose, self.anchor_vr = self.pose.copy(), sample.pose.copy()
+            self.reanchor(sample)
             self.holding = False
         else:
             distance = float(np.linalg.norm(sample.pose[:3] - self.previous.pose[:3]))
@@ -238,26 +247,29 @@ class Planner:
                 if self.args.execute:
                     raise ValueError(f"VR pose jumped: {self.last_input_jump}; restart bridge to realign")
                 # Preview can discard a discontinuity without enabling physical motion.
-                self.anchor_pose, self.anchor_vr = self.pose.copy(), sample.pose.copy()
+                self.reanchor(sample)
                 self.previous = sample
                 self.status = "preview realigned (VR jump discarded)"
                 return self.q.copy(), self.gripper
         self.previous = sample
         target = mapped_pose(self.anchor_pose, self.anchor_vr, sample.pose, self.frame,
                              self.args.scale, self.args.rotation_scale)
-        if np.linalg.norm(target[:3] - self.origin) > self.args.radius:
-            raise ValueError("Target exceeds startup workspace radius; restart to realign")
+        displacement = target[:3] - self.origin
+        self.workspace_clamped = np.linalg.norm(displacement) > self.args.radius
+        if self.workspace_clamped:
+            target[:3] = self.origin + limited(displacement, self.args.radius)
         target[:3] = self.pose[:3] + limited(target[:3] - self.pose[:3], self.args.speed * DT)
         delta_rot = (rotation(target) * rotation(self.pose).inv()).as_rotvec()
         target[3:] = (Rotation.from_rotvec(limited(delta_rot, self.args.angular_speed * DT))
                       * rotation(self.pose)).as_euler("xyz")
         candidate = self.q.copy()
-        self.status = "tracking"
+        self.status = "tracking (workspace limited)" if self.workspace_clamped else "tracking"
         if (np.linalg.norm(target[:3] - self.pose[:3]) > 1e-7
                 or (rotation(target) * rotation(self.pose).inv()).magnitude() > 1e-6):
             status, solution = self.solver.inverse_kinematics(target, self.q)
             if status != 0:
                 self.status = f"IK rejected: {self.solver.get_ik_status_name(status)}"
+                self.reanchor(sample)
                 return self.q.copy(), self.gripper
             solution = vector(solution, self.robot.joint_dof)
             outside = np.flatnonzero((solution < self.robot.joint_pos_min)
@@ -270,6 +282,7 @@ class Planner:
                                 "min_rad": float(self.robot.joint_pos_min[i]),
                                 "max_rad": float(self.robot.joint_pos_max[i])} for i in outside],
                 }
+                self.reanchor(sample)
                 return self.q.copy(), self.gripper
             solved_pose = vector(self.solver.forward_kinematics(solution), 6)
             if (np.linalg.norm(solved_pose[:3] - target[:3]) > 0.002
@@ -291,21 +304,33 @@ class Planner:
             if fraction < 1.0:
                 candidate = self.q + step * fraction
                 self.status = "holding (robot catching up)" if fraction == 0 else "tracking (feedback limited)"
+                if fraction == 0:
+                    self.reanchor(sample)
         # Joint interpolation is nonlinear in Cartesian space. Backtrack rather
         # than repeatedly rejecting the same otherwise valid joint direction.
+        workspace_step_limited = False
         for attempt in range(13):
             pose = vector(self.solver.forward_kinematics(candidate), 6)
-            if (np.linalg.norm(pose[:3] - self.pose[:3]) <= self.args.speed * DT * 1.1 + 1e-6
+            within_workspace = np.linalg.norm(pose[:3] - self.origin) <= self.args.radius + 1e-9
+            if (within_workspace
+                    and np.linalg.norm(pose[:3] - self.pose[:3]) <= self.args.speed * DT * 1.1 + 1e-6
                     and (rotation(pose) * rotation(self.pose).inv()).magnitude() <= self.args.angular_speed * DT * 1.1 + 1e-6):
                 if attempt:
-                    self.status = "tracking (FK step reduced)"
+                    self.status = ("tracking (workspace step reduced)" if workspace_step_limited
+                                   else "tracking (FK step reduced)")
                 break
+            workspace_step_limited |= not within_workspace
             candidate = self.q + (candidate - self.q) * 0.5
         else:
-            self.status = "holding (FK speed limit)"
+            self.status = ("holding (workspace boundary)" if workspace_step_limited
+                           else "holding (FK speed limit)")
+            if workspace_step_limited:
+                self.reanchor(sample)
             return self.q.copy(), self.gripper
-        if np.linalg.norm(pose[:3] - self.origin) > self.args.radius:
-            raise ValueError("FK target outside startup workspace radius")
+        if (self.workspace_clamped and self.status == "tracking (workspace limited)"
+                and np.max(np.abs(candidate - self.q)) < 1e-9):
+            self.status = "holding (workspace boundary)"
+            self.reanchor(sample)
         self.q, self.pose = candidate, pose
         return candidate.copy(), self.gripper
 
@@ -359,6 +384,8 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                 last_print = tick
                 latest = inputs.get(side, require_fresh=False)
                 diagnostic_time = time.monotonic()
+                actual_q = vector(state["joint_pos"], robot.joint_dof) if args.execute else None
+                lagging_joint = int(np.argmax(np.abs(q - actual_q))) if args.execute else None
                 print(json.dumps({"arm": side, "execute": args.execute,
                                   "status": planner.status,
                                   "vr_packet_age_s": round(diagnostic_time - latest.received, 3),
@@ -368,10 +395,15 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                                   "vr_gripper_raw": round(latest.gripper, 6),
                                   "last_input_jump": planner.last_input_jump,
                                   "ik_rejection": planner.ik_rejection,
+                                  "workspace_clamped": planner.workspace_clamped,
                                   "target_pose": planner.pose.round(5).tolist(),
                                   "actual_pose": vector(state["ee_pose"], 6).round(5).tolist() if args.execute else None,
-                                  "actual_joint_pos": vector(state["joint_pos"], robot.joint_dof).round(5).tolist() if args.execute else None,
-                                  "joint_error_max_rad": round(float(np.max(np.abs(q - vector(state["joint_pos"], robot.joint_dof)))), 6) if args.execute else None,
+                                  "actual_joint_pos": actual_q.round(5).tolist() if args.execute else None,
+                                  "joint_error_max_rad": round(float(abs(q - actual_q)[lagging_joint]), 6) if args.execute else None,
+                                  "lagging_joint": lagging_joint + 1 if args.execute else None,
+                                  "lagging_joint_vel_rad_s": round(float(vector(state["joint_vel"], robot.joint_dof)[lagging_joint]), 6) if args.execute else None,
+                                  "lagging_joint_torque_readout": round(float(vector(state["joint_torque"], robot.joint_dof)[lagging_joint]), 5) if args.execute else None,
+                                  "actual_gripper_m": round(float(state["gripper_pos"]), 5) if args.execute else None,
                                   "joint_pos": q.round(5).tolist(), "gripper_m": round(grip, 5)}), flush=True)
             stop.wait(max(0, DT - (time.monotonic() - tick)))
     except Exception as error:
