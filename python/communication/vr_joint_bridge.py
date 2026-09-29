@@ -85,6 +85,11 @@ class Sample:
     counter: int
     received: float
     changed: float
+    generation: int = 0
+
+
+class InputUnavailable(ValueError):
+    pass
 
 
 class Inputs:
@@ -93,6 +98,12 @@ class Inputs:
         self.lock = threading.Lock()
         self.samples = {}
         self.waiting_registration = set()
+        self.generation = 0
+
+    def disconnected(self):
+        with self.lock:
+            self.generation += 1
+        self.waiting_registration.clear()
 
     def receive(self, topic, message_type, payload):
         side = {"ARX_VR_R": "right", "ARX_VR_L": "left"}.get(topic.lstrip("/"))
@@ -117,19 +128,23 @@ class Inputs:
         now = time.monotonic()
         with self.lock:
             previous = self.samples.get(side)
+            if previous is not None and previous.generation != self.generation:
+                previous = None
             changed = now
             if previous is not None:
                 if counter < previous.counter:
                     raise ValueError(f"{side}: VR counter reset; restart and realign")
                 if counter == previous.counter:
                     changed = previous.changed
-            self.samples[side] = Sample(pose, gripper, counter, now, changed)
+            self.samples[side] = Sample(pose, gripper, counter, now, changed, self.generation)
 
-    def get(self, side):
+    def get(self, side, require_fresh=True):
         with self.lock:
             sample = self.samples.get(side)
-        if sample is None or time.monotonic() - sample.received > self.timeout:
-            raise ValueError(f"{side}: no fresh VR packets")
+            generation = self.generation
+        if sample is None or (require_fresh and (
+                sample.generation != generation or time.monotonic() - sample.received > self.timeout)):
+            raise InputUnavailable(f"{side}: no fresh VR packets")
         return sample
 
 
@@ -170,6 +185,10 @@ class Planner:
             if np.max(np.abs(actual - self.q)) > 0.07 or abs(grip - self.gripper) > 0.004:
                 raise ValueError("Robot tracking error exceeded joint/gripper limits")
         now = time.monotonic()
+        if sample.generation != self.previous.generation:
+            if self.args.execute:
+                raise ValueError("VR connection changed during execution")
+            self.holding = True
         if now - sample.changed > self.args.hold_timeout:
             self.holding, self.status = True, "holding (VR counter unchanged)"
             return self.q.copy(), self.gripper
@@ -243,9 +262,9 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
     client = JointClient(args.robot_host, getattr(args, side + "_port"))
     engaged = False
     try:
-        inputs.get(side)
+        inputs.get(side, require_fresh=args.execute)
         state = client.request("GET_STATE")
-        planner = Planner(robot, solver, state, inputs.get(side),
+        planner = Planner(robot, solver, state, inputs.get(side, require_fresh=args.execute),
                           getattr(args, side + "_frame_rpy"), args)
         if args.execute:
             if stop.is_set():
@@ -261,8 +280,15 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
         aligned = False
         while not stop.is_set():
             tick = time.monotonic()
-            sample = inputs.get(side)
-            if start.is_set():
+            try:
+                sample = inputs.get(side)
+            except InputUnavailable:
+                if args.execute:
+                    raise
+                sample = None
+                planner.holding = True
+                planner.status = "waiting (no fresh VR packets)"
+            if sample is not None and start.is_set():
                 if not aligned:
                     planner = Planner(robot, solver, state, sample,
                                       getattr(args, side + "_frame_rpy"), args)
@@ -273,7 +299,7 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
             if stop.is_set():
                 break
             # Recheck age after IK; an old sample never renews the robot watchdog.
-            if time.monotonic() - sample.received > args.input_timeout:
+            if args.execute and time.monotonic() - sample.received > args.input_timeout:
                 raise ValueError("VR sample expired during planning")
             if args.execute:
                 state = client.request("SET_JOINT_POS", {"joint_pos": q, "gripper_pos": grip})
@@ -281,6 +307,8 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                 last_print = tick
                 print(json.dumps({"arm": side, "execute": args.execute,
                                   "status": planner.status,
+                                  "vr_packet_age_s": round(time.monotonic() - inputs.get(side, False).received, 3),
+                                  "vr_counter": inputs.get(side, False).counter,
                                   "last_input_jump": planner.last_input_jump,
                                   "target_pose": planner.pose.round(5).tolist(),
                                   "joint_pos": q.round(5).tolist(), "gripper_m": round(grip, 5)}), flush=True)
@@ -300,29 +328,33 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
         client.close()
 
 
-def receive_session(listener, inputs, stop, failed):
-    try:
-        while not stop.is_set():
+def receive_session(listener, inputs, stop, failed, execute=True):
+    while not stop.is_set():
+        try:
             try:
                 connection, address = listener.accept()
-                break
             except socket.timeout:
                 continue
-        else:
-            return
-        with connection:
-            connection.settimeout(inputs.timeout)
-            print(f"Quest connected: {address}", flush=True)
-            def receive(topic, message_type, payload):
-                if stop.is_set():
-                    raise EOFError("Session stopped")
-                inputs.receive(topic, message_type, payload)
-            inspect_connection(connection, inputs.protocol, receive, report=False, stop_event=stop)
-    except Exception as error:
-        if not stop.is_set():
+            with connection:
+                connection.settimeout(inputs.timeout)
+                print(f"Quest connected: {address}", flush=True)
+                inspect_connection(connection, inputs.protocol, inputs.receive, report=False,
+                                   stop_event=stop, wait_on_timeout=not execute)
+        except (OSError, EOFError) as error:
+            if stop.is_set():
+                return
+            if not execute:
+                inputs.disconnected()
+                print(f"PREVIEW VR: {error}; waiting for Quest to reconnect", flush=True)
+                continue
             print(f"STOP VR: {type(error).__name__}: {error}", flush=True)
             failed.set()
-        stop.set()
+            stop.set()
+        except Exception as error:
+            if not stop.is_set():
+                print(f"STOP VR: {type(error).__name__}: {error}", flush=True)
+                failed.set()
+            stop.set()
 
 
 def parse_args():
@@ -342,7 +374,8 @@ def parse_args():
     parser.add_argument("--speed", type=float, default=0.02, help="Cartesian speed cap, m/s (max 0.05).")
     parser.add_argument("--joint-speed", type=float, default=0.15, help="Joint speed cap, rad/s (max 0.3).")
     parser.add_argument("--radius", type=float, default=0.08, help="Radius around startup FK position, meters (max 0.15).")
-    parser.add_argument("--input-timeout", type=float, default=0.3)
+    parser.add_argument("--input-timeout", type=float, default=0.3,
+                        help="Fresh-packet deadline in seconds; preview waits, execute stops.")
     parser.add_argument("--hold-timeout", type=float, default=0.1)
     args = parser.parse_args()
     for name, upper in (("scale", 1), ("speed", 0.05), ("joint_speed", 0.3),
@@ -376,7 +409,7 @@ def main():
         listener.bind((args.bind, args.port))
         listener.listen(1)
         listener.settimeout(0.2)
-        receiver = threading.Thread(target=receive_session, args=(listener, inputs, stop, failed))
+        receiver = threading.Thread(target=receive_session, args=(listener, inputs, stop, failed, args.execute))
         receiver.start()
         try:
             print(f"VR bridge at {args.bind}:{args.port}. "
@@ -390,7 +423,7 @@ def main():
                         inputs.get(side)
                     break
                 except ValueError:
-                    if time.monotonic() > deadline:
+                    if args.execute and time.monotonic() > deadline:
                         raise ValueError("Both Quest topics not received within 60 seconds")
                     stop.wait(0.05)
             if stop.is_set():
@@ -405,7 +438,8 @@ def main():
                 client = JointClient(args.robot_host, getattr(args, side + "_port"))
                 try:
                     state = client.request("GET_STATE")
-                    Planner(robot, solver, state, inputs.get(side), getattr(args, side + "_frame_rpy"), args)
+                    Planner(robot, solver, state, inputs.get(side, require_fresh=args.execute),
+                            getattr(args, side + "_frame_rpy"), args)
                 finally:
                     client.close()
                 configs.append((side, robot, solver))
@@ -415,8 +449,9 @@ def main():
                 workers.append(worker)
                 worker.start()
             while not stop.wait(0.02):
-                for side in ("right", "left"):
-                    inputs.get(side)
+                if args.execute:
+                    for side in ("right", "left"):
+                        inputs.get(side)
                 if all(event.is_set() for event in ready):
                     start.set()
         except Exception as error:

@@ -29,23 +29,28 @@ def decode_pos_cmd(payload, protocol):
     return result
 
 
-def receive_exact(connection, size, stop_event=None):
+def receive_exact(connection, size, stop_event=None, wait_on_timeout=False):
     data = bytearray()
     while len(data) < size:
         if stop_event is not None and stop_event.is_set():
             raise EOFError("Session stopped")
-        chunk = connection.recv(size - len(data))
+        try:
+            chunk = connection.recv(size - len(data))
+        except socket.timeout:
+            if wait_on_timeout:
+                continue
+            raise
         if not chunk:
             raise EOFError("Peer disconnected")
         data.extend(chunk)
     return bytes(data)
 
 
-def receive_field(connection, limit, stop_event=None):
-    size = struct.unpack("<I", receive_exact(connection, 4, stop_event))[0]
+def receive_field(connection, limit, stop_event=None, wait_on_timeout=False):
+    size = struct.unpack("<I", receive_exact(connection, 4, stop_event, wait_on_timeout))[0]
     if size > limit:
         raise ValueError(f"Field size {size} exceeds limit {limit}")
-    return receive_exact(connection, size, stop_event)
+    return receive_exact(connection, size, stop_event, wait_on_timeout)
 
 
 def send_command(connection, command, params):
@@ -70,15 +75,16 @@ def parse_command(topic, payload):
     return params
 
 
-def inspect_connection(connection, protocol, on_message=None, report=True, stop_event=None):
+def inspect_connection(connection, protocol, on_message=None, report=True, stop_event=None,
+                       wait_on_timeout=False):
     # Unity ROS-TCP-Endpoint v0.7.0 uses a JSON string inside metadata.
     send_command(connection, "__handshake", {
         "version": "v0.7.0", "metadata": json.dumps({"protocol": protocol}),
     })
     publishers, counts, last_print = {}, {}, {}
     while stop_event is None or not stop_event.is_set():
-        topic = receive_field(connection, 4096, stop_event).decode("utf-8").rstrip("\0")
-        payload = receive_field(connection, 1024 * 1024, stop_event)
+        topic = receive_field(connection, 4096, stop_event, wait_on_timeout).decode("utf-8").rstrip("\0")
+        payload = receive_field(connection, 1024 * 1024, stop_event, wait_on_timeout)
         if not topic:
             continue
         if topic.startswith("__"):

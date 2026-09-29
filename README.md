@@ -111,8 +111,9 @@ Stop `vr_receiver.py` to free port 10000. In terminal 2, start a preview:
 python communication/vr_joint_bridge.py
 ```
 
-Reopen the Quest APK. The bridge waits up to 60 seconds for both `ARX_VR_R`
-and `ARX_VR_L`. Quest may send pose frames before its publisher registrations
+Reopen the Quest APK. Preview waits for both `ARX_VR_R` and `ARX_VR_L` without
+a startup deadline; execute mode allows 60 seconds. Quest may send pose frames
+before its publisher registrations
 on reconnect; those early frames are discarded until the type is registered.
 Right maps to localhost:8765/can0; left to localhost:8764/can1.
 The preview queries both servers with `GET_STATE`, then simulates joint targets
@@ -123,6 +124,12 @@ In preview, a large input jump is discarded and the VR reference is realigned
 without changing the simulated arm target. `last_input_jump` records its size,
 packet interval and counter delta. Execute mode still stops on these jumps.
 Rotation jumps are checked only when `--rotation-scale` is nonzero.
+Preview keeps its simulated targets fixed when packets are missing, shows
+`waiting (no fresh VR packets)`, and resumes with a new VR reference when data
+returns. It also accepts Quest reconnections without restarting the process.
+TCP receive pauses preserve partially received frames, including their length
+headers. `vr_packet_age_s` shows how long since the last valid pose packet;
+`vr_counter` can remain constant while stationary packets keep arriving.
 
 After checking axis directions, clear the arms' homing paths, release the
 gripper triggers and stop the preview. To move the arms, explicitly run:
@@ -155,13 +162,14 @@ changing for 0.1 s, the bridge holds the last joint/gripper target and rebases
 on resumed updates, discarding accumulated motion. This is an observed counter
 heuristic, not a verified deadman switch; tracking loss can look like a hold.
 
-Missing packets on either topic for 0.3 s, disconnection, counter reset, large
-pose jumps, tracking error, rejected ZMQ commands, or Ctrl+C stop the session.
+In execute mode, missing packets on either topic for 0.3 s, disconnection,
+counter reset, large pose jumps, tracking error, rejected ZMQ commands, or
+Ctrl+C stop the session.
 In execute mode both arms receive a best-effort damping command. Failed stop
 delivery relies on the joint server's 2-second watchdog; damping is not a
 position hold or power removal, and unsupported arms can settle under gravity.
-There is no automatic reconnect/re-arm or return home on exit. Restart the
-bridge explicitly after resolving the cause. A synchronous SDK homing call
+Execute mode has no automatic reconnect/re-arm or return home on exit. Restart
+the bridge explicitly after resolving the cause. A synchronous SDK homing call
 cannot be interrupted by the bridge's damping request until it completes.
 
 Limits do not provide collision avoidance, verified motor telemetry freshness,
