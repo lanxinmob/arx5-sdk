@@ -29,9 +29,11 @@ def decode_pos_cmd(payload, protocol):
     return result
 
 
-def receive_exact(connection, size):
+def receive_exact(connection, size, stop_event=None):
     data = bytearray()
     while len(data) < size:
+        if stop_event is not None and stop_event.is_set():
+            raise EOFError("Session stopped")
         chunk = connection.recv(size - len(data))
         if not chunk:
             raise EOFError("Peer disconnected")
@@ -39,11 +41,11 @@ def receive_exact(connection, size):
     return bytes(data)
 
 
-def receive_field(connection, limit):
-    size = struct.unpack("<I", receive_exact(connection, 4))[0]
+def receive_field(connection, limit, stop_event=None):
+    size = struct.unpack("<I", receive_exact(connection, 4, stop_event))[0]
     if size > limit:
         raise ValueError(f"Field size {size} exceeds limit {limit}")
-    return receive_exact(connection, size)
+    return receive_exact(connection, size, stop_event)
 
 
 def send_command(connection, command, params):
@@ -68,20 +70,21 @@ def parse_command(topic, payload):
     return params
 
 
-def inspect_connection(connection, protocol):
+def inspect_connection(connection, protocol, on_message=None, report=True, stop_event=None):
     # Unity ROS-TCP-Endpoint v0.7.0 uses a JSON string inside metadata.
     send_command(connection, "__handshake", {
         "version": "v0.7.0", "metadata": json.dumps({"protocol": protocol}),
     })
     publishers, counts, last_print = {}, {}, {}
-    while True:
-        topic = receive_field(connection, 4096).decode("utf-8").rstrip("\0")
-        payload = receive_field(connection, 1024 * 1024)
+    while stop_event is None or not stop_event.is_set():
+        topic = receive_field(connection, 4096, stop_event).decode("utf-8").rstrip("\0")
+        payload = receive_field(connection, 1024 * 1024, stop_event)
         if not topic:
             continue
         if topic.startswith("__"):
             params = parse_command(topic, payload)
-            print(f"{topic}: {params}", flush=True)
+            if report:
+                print(f"{topic}: {params}", flush=True)
             if topic == "__publish":
                 name, message = params.get("topic"), params.get("message_name")
                 if not isinstance(name, str) or not isinstance(message, str):
@@ -93,6 +96,10 @@ def inspect_connection(connection, protocol):
                 send_command(connection, "__error", {
                     "text": f"Diagnostic receiver does not implement {topic}",
                 })
+            continue
+        if on_message is not None:
+            on_message(topic, publishers.get(topic), payload)
+        if not report:
             continue
         counts[topic] = counts.get(topic, 0) + 1
         now = time.monotonic()
