@@ -66,6 +66,11 @@ contains `USB_Single_Serial`; the two ARX USB2CAN adapters are not that receiver
 It never needs an X5 controller process. Do not run the vendor `ARX_VR.sh`,
 which also opens several topic terminals, or `port.sh`, which changes global
 udev permissions.
+The local `ARX_VR.apk` is the `com.DefaultCompany.X5MRControl` app and also
+contains a Unity ROS-TCP connection setting. That setting alone does not show
+which transport the installed Quest app is using. The serial node cannot
+receive Wi-Fi packets; if no `USB_Single_Serial` receiver is present, use the
+non-motion TCP diagnostic below to identify the live path before proceeding.
 
 On this Jazzy host, build the vendor message and serial packages once:
 
@@ -130,10 +135,11 @@ field in either published message, so a constant zero is not a clutch signal.
 
 ### Quest VR Connection Diagnostics
 
-The ARX VR APK uses Unity ROS-TCP, not the ZMQ joint protocol. The inspected
-`ARX_VR.apk` has a serialized `ROSConnection` destination of
+The inspected ARX VR APK contains Unity ROS-TCP code, not the ZMQ joint
+protocol. Its serialized `ROSConnection` destination is
 `192.168.31.137:10000`; the PC must be reachable at that address unless the
-APK configuration has been changed. Sharing Wi-Fi alone is insufficient.
+APK configuration has been changed. Sharing Wi-Fi alone is insufficient to
+confirm that this connection is active.
 
 From `python/`, run the standard-library-only diagnostic receiver:
 
