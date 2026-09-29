@@ -144,6 +144,7 @@ class Planner:
         self.previous = sample
         self.holding = True
         self.status = "aligned"
+        self.last_input_jump = None
 
     def check_state(self, state):
         if state.get("emergency") is not False or not isinstance(state.get("armed"), bool):
@@ -175,9 +176,22 @@ class Planner:
         if self.holding:
             self.anchor_pose, self.anchor_vr = self.pose.copy(), sample.pose.copy()
             self.holding = False
-        elif (np.linalg.norm(sample.pose[:3] - self.previous.pose[:3]) > 0.15
-              or (rotation(sample.pose) * rotation(self.previous.pose).inv()).magnitude() > 0.8):
-            raise ValueError("VR pose jumped; restart bridge to realign")
+        else:
+            distance = float(np.linalg.norm(sample.pose[:3] - self.previous.pose[:3]))
+            angle = float((rotation(sample.pose) * rotation(self.previous.pose).inv()).magnitude())
+            if distance > 0.15 or (self.args.rotation_scale > 0 and angle > 0.8):
+                self.last_input_jump = {
+                    "translation_m": round(distance, 5), "rotation_rad": round(angle, 5),
+                    "packet_interval_s": round(sample.received - self.previous.received, 5),
+                    "counter_delta": sample.counter - self.previous.counter,
+                }
+                if self.args.execute:
+                    raise ValueError(f"VR pose jumped: {self.last_input_jump}; restart bridge to realign")
+                # Preview can discard a discontinuity without enabling physical motion.
+                self.anchor_pose, self.anchor_vr = self.pose.copy(), sample.pose.copy()
+                self.previous = sample
+                self.status = "preview realigned (VR jump discarded)"
+                return self.q.copy(), self.gripper
         self.previous = sample
         target = self.anchor_pose.copy()
         target[:3] += self.args.scale * self.frame.apply(sample.pose[:3] - self.anchor_vr[:3])
@@ -267,6 +281,7 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                 last_print = tick
                 print(json.dumps({"arm": side, "execute": args.execute,
                                   "status": planner.status,
+                                  "last_input_jump": planner.last_input_jump,
                                   "target_pose": planner.pose.round(5).tolist(),
                                   "joint_pos": q.round(5).tolist(), "gripper_m": round(grip, 5)}), flush=True)
             stop.wait(max(0, DT - (time.monotonic() - tick)))

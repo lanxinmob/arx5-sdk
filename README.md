@@ -119,6 +119,10 @@ The preview queries both servers with `GET_STATE`, then simulates joint targets
 from their initial states. It does not reset, command or damp the arms. Inspect
 `target_pose`, `joint_pos`, `gripper_m` and `status` while moving each controller.
 `IK rejected` means that pose has no accepted local IK solution; it is held.
+In preview, a large input jump is discarded and the VR reference is realigned
+without changing the simulated arm target. `last_input_jump` records its size,
+packet interval and counter delta. Execute mode still stops on these jumps.
+Rotation jumps are checked only when `--rotation-scale` is nonzero.
 
 After checking axis directions, clear the arms' homing paths, release the
 gripper triggers and stop the preview. To move the arms, explicitly run:
