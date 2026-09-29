@@ -124,17 +124,21 @@ from their initial states. It does not reset, command or damp the arms. Inspect
 and execute modes, rather than terminating the session. The gripper still
 follows its independent Quest command.
 `ik_rejection` lists the rejected Cartesian target and out-of-range joint
-numbers (1-based), candidate angles and allowed bounds in radians. Move the
-controller back toward a reachable pose to resume tracking. No joint limits
-are widened and the invalid solution is never sent or clipped into range.
+numbers (1-based), candidate angles and allowed bounds in radians. The VR
+reference is reset at a rejected pose so the next motion starts from the last
+valid arm target. No joint limits are widened and the invalid solution is
+never sent or clipped into range.
 Measured-state limit violations, tracking faults and stale execute inputs
 still stop the session. Execute targets pause or slow when any joint target is
 0.04 rad ahead of measured feedback; the existing 0.07 rad tracking-error stop
 remains. A gripper target more than 0.004 m from its measured position also
 stops the session; the reported 0.004499 m gripper error exceeded that limit
 even though the joint error was only 0.04 rad. `holding (robot catching up)`
-and `tracking (feedback limited)` report the joint feedback cap. Tracking
-faults include the current VR counter/pose and actual
+and `tracking (feedback limited)` report the joint feedback cap. At a full
+feedback stall the VR reference resets, so reversing the controller responds
+without retracing all motion accumulated while the robot was stopped. Gripper
+targets also stay within 0.002 m of measured width while normal feedback is
+available. Tracking faults include the current VR counter/pose and actual
 and target joint positions, so an input change between one-second diagnostics
 and STOP can be distinguished from hardware drift. `tracking (FK step reduced)`
 means joint interpolation exceeded a Cartesian speed cap and the step was shortened;
@@ -155,8 +159,10 @@ headers. `vr_packet_age_s` shows how long since the last valid pose packet;
 `vr_counter_age_s` measures how long the counter has remained unchanged.
 In execute mode, `actual_pose` and `actual_joint_pos` are robot feedback from
 the joint server; `joint_error_max_rad` compares that feedback with the sent
-target. `joint_pos` and `target_pose` are commanded targets, not proof of
-physical motion. These feedback diagnostics are null in preview mode.
+target. `lagging_joint` identifies the largest joint error (1-based), with its
+reported velocity and torque readout. `actual_gripper_m` is measured width.
+`joint_pos` and `target_pose` are commanded targets, not proof of physical
+motion. These feedback diagnostics are null in preview mode.
 If inputs change while the counter is frozen, the counter-based hold heuristic
 needs further validation; do not infer button state from the counter alone.
 
@@ -183,7 +189,9 @@ The joint server explicitly enables gravity compensation, like the follower
 in `python/examples/leader_follower_teleop.py`, while retaining position gains.
 The example's zero-kp drag mode is for the hand-guided leader; applying it to
 the VR follower would remove position tracking. Restart the joint servers
-to load server configuration changes.
+to load server configuration changes. That example copies measured leader
+joint angles directly at its controller rate; VR sends hand poses, so the
+bridge must solve IK and enforce pose and feedback bounds first.
 
 For can0=`X5_umi` and can1=`X5`, verify the new pose mapping without motion:
 
@@ -202,7 +210,8 @@ Translation and relative rotation can be scaled with `--scale` and
 `--rotation-scale`; the formula above uses both at 1. Defaults are 0.2 for
 translation and 0 for rotation; pass `--rotation-scale 1` to follow the complete
 relative controller orientation. Position and orientation rebase when tracking
-resumes after a hold, so hand movement during a hold is discarded. The default
+resumes after a hold, so hand movement during a hold is discarded. They also
+rebase when a joint or workspace boundary blocks motion. The default
 axis calibration is the identity; `--right-frame-rpy R P Y` and
 `--left-frame-rpy R P Y` rotate the controller's local axes into each tool's
 local axes (degrees). Verify the actual axis directions in preview before
@@ -210,9 +219,11 @@ execution. RPY values are in radians and use `Rz(yaw) Ry(pitch) Rx(roll)`.
 
 Tracking caps default to 0.02 m/s translation, 0.8 rad/s rotation, 0.15 rad/s
 per joint, and 0.08 m/s gripper width, at most 50 commands/s per arm. A
-target more than 0.08 m from the startup position stops the session unless
-`--radius` sets a larger boundary (maximum 0.15 m). `--angular-speed` controls
-the orientation speed cap; `--gripper-speed` changes the gripper width speed cap.
+target more than 0.08 m from the startup position is clamped to that boundary;
+`workspace_clamped` reports this, and moving back inward resumes tracking.
+The FK output is checked against the same boundary. `--radius` can set a larger
+boundary (maximum 0.15 m). `--angular-speed` controls the orientation speed cap;
+`--gripper-speed` changes the gripper width speed cap.
 
 Gripper raw 5 means fully open, 0 closed: width is `raw / 5 * gripper_width`
 from the selected SDK model. The APK's side trigger changes this scalar; the
