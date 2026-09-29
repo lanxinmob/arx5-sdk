@@ -160,6 +160,7 @@ class Planner:
         self.holding = True
         self.status = "aligned"
         self.last_input_jump = None
+        self.ik_rejection = None
 
     def check_state(self, state):
         if state.get("emergency") is not False or not isinstance(state.get("armed"), bool):
@@ -178,6 +179,7 @@ class Planner:
         return q, gripper
 
     def step(self, sample, state=None):
+        self.ik_rejection = None
         if state is not None:
             actual, grip = self.check_state(state)
             if not state["armed"]:
@@ -233,9 +235,17 @@ class Planner:
                 self.status = f"IK rejected: {self.solver.get_ik_status_name(status)}"
                 return self.q.copy(), self.gripper
             solution = vector(solution, self.robot.joint_dof)
-            if (np.any(solution < self.robot.joint_pos_min)
-                    or np.any(solution > self.robot.joint_pos_max)):
-                raise ValueError("IK solution outside joint limits")
+            outside = np.flatnonzero((solution < self.robot.joint_pos_min)
+                                     | (solution > self.robot.joint_pos_max))
+            if outside.size:
+                self.status = "holding (IK joint limit)"
+                self.ik_rejection = {
+                    "target_pose": target.tolist(),
+                    "joints": [{"joint": int(i) + 1, "candidate_rad": float(solution[i]),
+                                "min_rad": float(self.robot.joint_pos_min[i]),
+                                "max_rad": float(self.robot.joint_pos_max[i])} for i in outside],
+                }
+                return self.q.copy(), self.gripper
             solved_pose = vector(self.solver.forward_kinematics(solution), 6)
             if (np.linalg.norm(solved_pose[:3] - target[:3]) > 0.002
                     or (rotation(solved_pose) * rotation(target).inv()).magnitude() > 0.02):
@@ -310,6 +320,7 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                                   "vr_packet_age_s": round(time.monotonic() - inputs.get(side, False).received, 3),
                                   "vr_counter": inputs.get(side, False).counter,
                                   "last_input_jump": planner.last_input_jump,
+                                  "ik_rejection": planner.ik_rejection,
                                   "target_pose": planner.pose.round(5).tolist(),
                                   "joint_pos": q.round(5).tolist(), "gripper_m": round(grip, 5)}), flush=True)
             stop.wait(max(0, DT - (time.monotonic() - tick)))

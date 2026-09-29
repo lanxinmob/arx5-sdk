@@ -120,6 +120,15 @@ The preview queries both servers with `GET_STATE`, then simulates joint targets
 from their initial states. It does not reset, command or damp the arms. Inspect
 `target_pose`, `joint_pos`, `gripper_m` and `status` while moving each controller.
 `IK rejected` means that pose has no accepted local IK solution; it is held.
+`holding (IK joint limit)` also holds the last valid joint and gripper targets,
+in both preview and execute modes, rather than terminating the session.
+`ik_rejection` lists the rejected Cartesian target and out-of-range joint
+numbers (1-based), candidate angles and allowed bounds in radians. Move the
+controller back toward a reachable pose to resume tracking. No joint limits
+are widened and the invalid solution is never sent or clipped into range.
+Measured-state limit violations, tracking faults and stale execute inputs
+still stop the session. A posture near a joint limit can have very little
+Cartesian travel in some directions, even with small VR displacements.
 In preview, a large input jump is discarded and the VR reference is realigned
 without changing the simulated arm target. `last_input_jump` records its size,
 packet interval and counter delta. Execute mode still stops on these jumps.
