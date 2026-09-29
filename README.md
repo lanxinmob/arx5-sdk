@@ -88,10 +88,79 @@ built for ROS2. This is a diagnostic subset of the
 not a ROS node; it does not provide subscriptions or services.
 
 This receiver never opens CAN, connects to ZMQ, resets, or moves the arms.
-It is **not yet a motion bridge**. Actual teleoperation requires confirming
-the received message schema, pose frames, units, gripper and button semantics,
-then implementing IK and bounded joint targets for the two ZMQ services.
+It is **not a motion bridge**. Use the separate bridge below for joint targets.
 Do not interpret raw VR pose values as joint positions.
+
+### Quest Dual-Arm Joint Bridge
+
+`communication/vr_joint_bridge.py` receives the same Quest stream and uses the
+local SDK solver to send bounded joint targets through the existing servers.
+It requires the `arx5` environment (NumPy, SciPy, pyzmq and the built local SDK).
+It never creates a CAN controller. Use the actual arm models and calibrated
+joint server configuration. Only one policy may command these servers.
+
+From `python/`, start the joint servers in terminal 1:
+
+```bash
+python communication/zmq_joint_server.py X5 can0 X5 can1 --port 8765 --port 8764
+```
+
+Stop `vr_receiver.py` to free port 10000. In terminal 2, start a preview:
+
+```bash
+python communication/vr_joint_bridge.py
+```
+
+Reopen the Quest APK. The bridge waits up to 60 seconds for both `ARX_VR_R`
+and `ARX_VR_L`. Right maps to localhost:8765/can0; left to localhost:8764/can1.
+The preview queries both servers with `GET_STATE`, then simulates joint targets
+from their initial states. It does not reset, command or damp the arms. Inspect
+`target_pose`, `joint_pos`, `gripper_m` and `status` while moving each controller.
+`IK rejected` means that pose has no accepted local IK solution; it is held.
+
+After checking axis directions, clear the arms' homing paths, release the
+gripper triggers and stop the preview. To move the arms, explicitly run:
+
+```bash
+python communication/vr_joint_bridge.py --execute
+```
+
+**Execute mode automatically moves both arms home and opens their grippers
+after receiving fresh Quest data.** Each arm keeps sending a hold target while
+its peer finishes homing. Tracking starts after both finish, aligning the
+current VR poses to the measured arm poses. Initial VR absolute coordinates
+are not sent to the robot. Homing follows the server/SDK reset behavior, not
+the bridge's tracking speed limits; homing RPCs have a 30-second timeout.
+
+Default translation is 0.2 times the VR displacement, with identity VR-to-base
+axis mapping. Tracking caps are 0.02 m/s Cartesian, 0.15 rad/s per joint, and
+0.01 m/s gripper, at at most 50 commands/s per arm. A target more than 0.08 m
+from the startup position stops the session. Orientation is held by default;
+add `--rotation-scale 0.2` to follow relative rotations after verifying them.
+RPY is interpreted as radians with `Rz(yaw) Ry(pitch) Rx(roll)`. For differently
+mounted arms, `--right-frame-rpy R P Y` and `--left-frame-rpy R P Y` rotate the
+VR displacement and relative rotation into each base frame (arguments in
+degrees). Physical axis and scale validation is still required on your setup.
+
+Gripper raw 5 means fully open, 0 closed: width is `raw / 5 * gripper_width`
+from the selected SDK model. Use `--right-model` / `--left-model` if not X5.
+Both `mode` fields and the zero quaternion are ignored. If `time_count` stops
+changing for 0.1 s, the bridge holds the last joint/gripper target and rebases
+on resumed updates, discarding accumulated motion. This is an observed counter
+heuristic, not a verified deadman switch; tracking loss can look like a hold.
+
+Missing packets on either topic for 0.3 s, disconnection, counter reset, large
+pose jumps, tracking error, rejected ZMQ commands, or Ctrl+C stop the session.
+In execute mode both arms receive a best-effort damping command. Failed stop
+delivery relies on the joint server's 2-second watchdog; damping is not a
+position hold or power removal, and unsupported arms can settle under gravity.
+There is no automatic reconnect/re-arm or return home on exit. Restart the
+bridge explicitly after resolving the cause. A synchronous SDK homing call
+cannot be interrupted by the bridge's damping request until it completes.
+
+Limits do not provide collision avoidance, verified motor telemetry freshness,
+or synchronization between arms. Offline tests use the real IK solver and
+mock joint servers; physical dual-arm tracking has not yet been verified.
 
 ### Joint Position Server
 
