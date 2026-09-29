@@ -127,7 +127,11 @@ numbers (1-based), candidate angles and allowed bounds in radians. Move the
 controller back toward a reachable pose to resume tracking. No joint limits
 are widened and the invalid solution is never sent or clipped into range.
 Measured-state limit violations, tracking faults and stale execute inputs
-still stop the session. A posture near a joint limit can have very little
+still stop the session. Tracking faults report each joint error in radians
+and the gripper error in meters. `tracking (FK step reduced)` means joint
+interpolation exceeded a Cartesian speed cap and the step was shortened;
+the planner retries up to 12 halvings before holding the previous target.
+A posture near a joint limit can have very little
 Cartesian travel in some directions, even with small VR displacements.
 In preview, a large input jump is discarded and the VR reference is realigned
 without changing the simulated arm target. `last_input_jump` records its size,

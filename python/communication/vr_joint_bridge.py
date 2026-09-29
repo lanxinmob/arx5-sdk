@@ -185,7 +185,11 @@ class Planner:
             if not state["armed"]:
                 raise ValueError("Joint server disarmed; restart bridge explicitly")
             if np.max(np.abs(actual - self.q)) > 0.07 or abs(grip - self.gripper) > 0.004:
-                raise ValueError("Robot tracking error exceeded joint/gripper limits")
+                raise ValueError(
+                    "Robot tracking error exceeded joint/gripper limits: "
+                    f"joint_error_rad={(actual - self.q).round(6).tolist()}, "
+                    f"gripper_error_m={grip - self.gripper:.6f}; "
+                    "limits=0.07 rad / 0.004 m")
         now = time.monotonic()
         if sample.generation != self.previous.generation:
             if self.args.execute:
@@ -254,10 +258,17 @@ class Planner:
             speed = np.minimum(self.args.joint_speed, self.robot.joint_vel_max)
             ratio = max(1.0, float(np.max(np.abs(delta) / (speed * DT))))
             candidate += delta / ratio
-        pose = vector(self.solver.forward_kinematics(candidate), 6)
-        # Joint interpolation can change Cartesian speed; check the resulting FK too.
-        if (np.linalg.norm(pose[:3] - self.pose[:3]) > self.args.speed * DT * 1.1 + 1e-6
-                or (rotation(pose) * rotation(self.pose).inv()).magnitude() > 0.2 * DT * 1.1 + 1e-6):
+        # Joint interpolation is nonlinear in Cartesian space. Backtrack rather
+        # than repeatedly rejecting the same otherwise valid joint direction.
+        for attempt in range(13):
+            pose = vector(self.solver.forward_kinematics(candidate), 6)
+            if (np.linalg.norm(pose[:3] - self.pose[:3]) <= self.args.speed * DT * 1.1 + 1e-6
+                    and (rotation(pose) * rotation(self.pose).inv()).magnitude() <= 0.2 * DT * 1.1 + 1e-6):
+                if attempt:
+                    self.status = "tracking (FK step reduced)"
+                break
+            candidate = self.q + (candidate - self.q) * 0.5
+        else:
             self.status = "holding (FK speed limit)"
             return self.q.copy(), self.gripper
         if np.linalg.norm(pose[:3] - self.origin) > self.args.radius:
