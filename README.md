@@ -141,6 +141,10 @@ headers. `vr_packet_age_s` shows how long since the last valid pose packet;
 `vr_counter` can remain constant while stationary packets keep arriving.
 `vr_pose` and `vr_gripper_raw` show the received input before mapping and IK;
 `vr_counter_age_s` measures how long the counter has remained unchanged.
+In execute mode, `actual_pose` and `actual_joint_pos` are robot feedback from
+the joint server; `joint_error_max_rad` compares that feedback with the sent
+target. `joint_pos` and `target_pose` are commanded targets, not proof of
+physical motion. These feedback diagnostics are null in preview mode.
 If inputs change while the counter is frozen, the counter-based hold heuristic
 needs further validation; do not infer button state from the counter alone.
 

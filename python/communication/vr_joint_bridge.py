@@ -327,6 +327,9 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                                   "last_input_jump": planner.last_input_jump,
                                   "ik_rejection": planner.ik_rejection,
                                   "target_pose": planner.pose.round(5).tolist(),
+                                  "actual_pose": vector(state["ee_pose"], 6).round(5).tolist() if args.execute else None,
+                                  "actual_joint_pos": vector(state["joint_pos"], robot.joint_dof).round(5).tolist() if args.execute else None,
+                                  "joint_error_max_rad": round(float(np.max(np.abs(q - vector(state["joint_pos"], robot.joint_dof)))), 6) if args.execute else None,
                                   "joint_pos": q.round(5).tolist(), "gripper_m": round(grip, 5)}), flush=True)
             stop.wait(max(0, DT - (time.monotonic() - tick)))
     except Exception as error:
