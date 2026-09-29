@@ -381,11 +381,11 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
     finally:
         if engaged:
             try:
-                client.request("SET_TO_DAMPING")
-                print(f"{side}: damping acknowledged", flush=True)
+                client.request("HOLD_POSITION", timeout=2000)
+                print(f"{side}: position hold acknowledged", flush=True)
             except Exception as error:
-                print(f"{side}: damping not acknowledged: {error}; "
-                      "server watchdog remains the fallback", flush=True)
+                print(f"{side}: position hold not acknowledged: {error}; "
+                      "configured server timeout hold is the fallback if still armed", flush=True)
         client.close()
 
 
@@ -504,6 +504,8 @@ def main():
                 client = JointClient(args.robot_host, getattr(args, side + "_port"))
                 try:
                     state = client.request("GET_STATE")
+                    if args.execute and state.get("timeout_action") != "hold":
+                        raise ValueError(f"{side}: joint server requires --timeout-action hold before --execute")
                     Planner(robot, solver, state, inputs.get(side, require_fresh=args.execute),
                             getattr(args, side + "_frame_rpy"), args)
                 finally:

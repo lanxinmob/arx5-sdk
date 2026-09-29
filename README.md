@@ -102,13 +102,13 @@ joint server configuration. Only one policy may command these servers.
 From `python/`, start the joint servers in terminal 1:
 
 ```bash
-python communication/zmq_joint_server.py X5 can0 X5 can1 --port 8765 --port 8764
+python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764 --timeout-action hold
 ```
 
 Stop `vr_receiver.py` to free port 10000. In terminal 2, start a preview:
 
 ```bash
-python communication/vr_joint_bridge.py
+python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
 ```
 
 Reopen the Quest APK. Preview waits for both `ARX_VR_R` and `ARX_VR_L` without
@@ -130,8 +130,11 @@ are widened and the invalid solution is never sent or clipped into range.
 Measured-state limit violations, tracking faults and stale execute inputs
 still stop the session. Execute targets pause or slow when any joint target is
 0.04 rad ahead of measured feedback; the existing 0.07 rad tracking-error stop
-remains. `holding (robot catching up)` and `tracking (feedback limited)` report
-this behavior. Tracking faults include the current VR counter/pose and actual
+remains. A gripper target more than 0.004 m from its measured position also
+stops the session; the reported 0.004499 m gripper error exceeded that limit
+even though the joint error was only 0.04 rad. `holding (robot catching up)`
+and `tracking (feedback limited)` report the joint feedback cap. Tracking
+faults include the current VR counter/pose and actual
 and target joint positions, so an input change between one-second diagnostics
 and STOP can be distinguished from hardware drift. `tracking (FK step reduced)`
 means joint interpolation exceeded a Cartesian speed cap and the step was shortened;
@@ -161,7 +164,7 @@ After checking axis directions, clear the arms' homing paths, release the
 gripper triggers and stop the preview. To move the arms, explicitly run:
 
 ```bash
-python communication/vr_joint_bridge.py --execute
+python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5 --execute
 ```
 
 **Execute mode automatically moves both arms home and opens their grippers
@@ -225,12 +228,17 @@ look like a hold.
 In execute mode, missing packets on either topic for 0.3 s, disconnection,
 counter reset, large pose jumps, tracking error, rejected ZMQ commands, or
 Ctrl+C stop the session.
-In execute mode both arms receive a best-effort damping command. Failed stop
-delivery relies on the joint server's 2-second watchdog; damping is not a
-position hold or power removal, and unsupported arms can settle under gravity.
+In execute mode both arms receive a best-effort `HOLD_POSITION` command, which
+captures measured joint and gripper positions and stops accepting further joint
+targets. Start both joint servers with `--timeout-action hold`; the bridge
+checks this before either arm homes. If the stop request cannot be delivered,
+the running server holds position after its 2-second command timeout. Position
+hold retains the follower's position gains and gravity compensation while the
+server and SDK controller remain healthy and running. It does not bypass an SDK
+emergency; an SDK fault or server shutdown may still enter damping/passive mode.
 Execute mode has no automatic reconnect/re-arm or return home on exit. Restart
 the bridge explicitly after resolving the cause. A synchronous SDK homing call
-cannot be interrupted by the bridge's damping request until it completes.
+cannot be interrupted by the bridge's hold request until it completes.
 
 Limits do not provide collision avoidance, verified motor telemetry freshness,
 or synchronization between arms. Offline tests use the real IK solver and
@@ -241,7 +249,7 @@ mock joint servers; physical dual-arm tracking has not yet been verified.
 From `python/` in the `arx5` environment, replace the Cartesian server with:
 
 ```bash
-python communication/zmq_joint_server.py X5 can0 X5 can1 --port 8765 --port 8764
+python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764 --timeout-action hold
 ```
 
 For this dual-arm setup, can0/8765 is the right arm and can1/8764 is the left
@@ -256,9 +264,10 @@ two arms' motion clocks.
 
 | Command | Request data | Reply data |
 | --- | --- | --- |
-| `GET_STATE` | `None` | Existing state fields plus `armed` and `emergency` |
+| `GET_STATE` | `None` | Existing state fields plus `armed`, `holding`, `timeout_action` and `emergency` |
 | `RESET_TO_HOME` | `None` | `"OK"`; moves home, opens gripper, enables joint commands |
 | `SET_JOINT_POS` | `{"joint_pos": six_joint_angles, "gripper_pos": width}` | Robot state |
+| `HOLD_POSITION` | `None` | `"OK"`; holds measured joints and gripper, disables new joint commands |
 | `SET_TO_DAMPING` | `None` | `"OK"`; disables joint commands |
 
 Angles are absolute ARX5 joint positions in radians, in SDK motor order;
@@ -279,9 +288,11 @@ right.set_joint_pos(state["joint_pos"], state["gripper_pos"])
 
 Send targets continuously after reset. By default, 2 seconds without an
 accepted joint target switches to damping and requires another explicit reset.
-`GET_STATE` and rejected commands do not refresh this deadline. Damping is not
-a position hold or power removal; an unsupported X5 may settle under gravity.
-Shutdown also uses SDK damping/passive behavior, never automatic homing.
+Use `--timeout-action hold` for VR: an expired command deadline instead holds
+the measured position and requires another explicit reset. `GET_STATE` and
+rejected commands do not refresh this deadline. An SDK emergency still forces
+damping, and server shutdown uses SDK damping/passive behavior rather than
+leaving a powered position hold behind.
 
 Targets must be finite and inside SDK joint/gripper limits. Defaults reject
 changes exceeding 0.1 rad per joint or 0.005 m gripper width, relative to both
