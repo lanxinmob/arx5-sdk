@@ -255,7 +255,7 @@ class Planner:
         target = mapped_pose(self.anchor_pose, self.anchor_vr, sample.pose, self.frame,
                              self.args.scale, self.args.rotation_scale)
         displacement = target[:3] - self.origin
-        self.workspace_clamped = np.linalg.norm(displacement) > self.args.radius
+        self.workspace_clamped = bool(np.linalg.norm(displacement) > self.args.radius)
         if self.workspace_clamped:
             target[:3] = self.origin + limited(displacement, self.args.radius)
         target[:3] = self.pose[:3] + limited(target[:3] - self.pose[:3], self.args.speed * DT)
