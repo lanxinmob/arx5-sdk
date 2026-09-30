@@ -216,6 +216,9 @@ default two-second command watchdog switches to SDK damping if accepted pose
 commands stop; state queries and rejected commands do not extend that
 deadline. Damping is not power removal or a position hold.
 An SDK failure during reset also disarms the server and requests damping.
+The reset wait defaults to two seconds: this `X5_umi` was still over 9 mm from
+home after the former 0.7-second wait, then settled near 4 mm during a live
+hold trial.
 
 In another terminal, with the Quest publisher still running, source ROS and
 start with every translation axis disabled. The bridge waits for three
@@ -241,8 +244,13 @@ one enabled axis, for example `--xyz-map 0,y,0` if robot -Y is verified as
 the intended body-right direction. Repeat for the
 other axes before combining them. Control mode requires explicit mapping,
 scale, speed, radius and interface; it caps this initial stage at 0.01 m/s and
-a 0.02 m home radius. The recommended first trial is only 2 mm because offline
-IK on this `X5_umi` model rejected some -X targets 4 mm from zero-joint home;
+a 0.02 m home radius. After verifying small motions and a physically clear,
+measured workspace, `--wide-range` permits up to 0.02 m/s and a 0.15 m home
+radius; the guarded server must be restarted with matching workspace bounds,
+home radius and a position step no greater than 0.002 m. This flag does not
+infer clearance or make unreachable poses valid. The recommended first trial
+is only 2 mm because offline IK on this `X5_umi` model rejected some -X
+targets 4 mm from zero-joint home;
 offline IK does not prove physical clearance or tracking. Source jumps over
 0.1 m and counter resets clear the startup motion gate; jumps also reanchor
 the target. Stale poses hold the last target, and a measured XYZ error over

@@ -43,7 +43,7 @@ class Arx5AgentSafeServer:
         max_home_translation_radius: float = 0.45,
         workspace_min: Optional[Sequence[float]] = None,
         workspace_max: Optional[Sequence[float]] = None,
-        reset_settle_time: float = 0.7,
+        reset_settle_time: float = 2.0,
     ) -> None:
         if not np.isfinite(no_cmd_timeout) or no_cmd_timeout <= 0.0:
             raise ValueError("no_cmd_timeout must be a positive finite value")
@@ -337,7 +337,7 @@ class Arx5AgentSafeServer:
 )
 @click.option("--workspace-min", type=(float, float, float), default=None)
 @click.option("--workspace-max", type=(float, float, float), default=None)
-@click.option("--reset-settle-time", default=0.7, type=float, show_default=True)
+@click.option("--reset-settle-time", default=2.0, type=float, show_default=True)
 def main(
     model: str,
     interface: str,

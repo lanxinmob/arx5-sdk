@@ -240,6 +240,8 @@ def parse_args():
                         help="Robot X,Y,Z source axes; 0 disables an axis (e.g. 0,-x,0)")
     parser.add_argument("--speed", type=positive, help="Target speed cap in m/s")
     parser.add_argument("--radius", type=positive, help="Target radius around SDK home in meters")
+    parser.add_argument("--wide-range", action="store_true",
+                        help="Allow up to 0.02 m/s and 0.15 m within measured server workspace")
     parser.add_argument("--input-jump-limit", type=positive, default=0.1,
                         help="Reanchor after a larger Quest position step in meters")
     parser.add_argument("--max-tracking-error", type=positive, default=0.006,
@@ -255,8 +257,12 @@ def parse_args():
         if missing or not args.reset_to_home:
             parser.error("Control requires --interface --scale --xyz-map --speed "
                          "--radius --reset-to-home")
-        if args.speed > 0.01 or args.radius > 0.02:
-            parser.error("Initial control is limited to 0.01 m/s and a 0.02 m home radius")
+        speed_limit, radius_limit = (0.02, 0.15) if args.wide_range else (0.01, 0.02)
+        if args.speed > speed_limit or args.radius > radius_limit:
+            parser.error(
+                f"Control is limited to {speed_limit:.2f} m/s and a "
+                f"{radius_limit:.2f} m home radius"
+            )
     elif args.reset_to_home:
         parser.error("--reset-to-home is only valid with --mode control")
     if args.scale is None:
