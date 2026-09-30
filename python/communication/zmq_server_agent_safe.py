@@ -88,6 +88,7 @@ class Arx5AgentSafeServer:
                     self.controller.set_to_damping()
                 except Exception:
                     print(_exception_text())
+                self.controller = None
             self.socket.close()
             self.context.term()
             raise
@@ -313,6 +314,7 @@ class Arx5AgentSafeServer:
             self.controller.set_to_damping()
         except Exception:
             print(_exception_text())
+        self.controller = None
         self.poller.unregister(self.socket)
         self.socket.close()
         self.context.term()
