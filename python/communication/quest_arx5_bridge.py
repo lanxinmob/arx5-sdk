@@ -284,24 +284,41 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
             not np.isfinite(workspace_min).all() or not np.isfinite(workspace_max).all() or
             np.any(home[:3] < workspace_min) or np.any(home[:3] > workspace_max)):
         raise RuntimeError("Guarded server home pose is outside its finite workspace")
-    client.request("RESET_TO_HOME", timeout_ms=30000)
-    state = client.request("GET_STATE")
-    if not isinstance(state, dict) or state.get("emergency"):
-        raise RuntimeError("Guarded server reported an emergency or invalid state")
-    command_pose = np.asarray(state["ee_cmd_pose"], dtype=float)
-    measured_pose = np.asarray(state["ee_pose"], dtype=float)
-    gripper = float(state["gripper_cmd_pos"])
-    if (command_pose.shape != (6,) or not np.isfinite(command_pose).all() or
-            measured_pose.shape != (6,) or not np.isfinite(measured_pose).all() or
-            not math.isfinite(gripper) or
-            gripper < gripper_min or gripper > gripper_max or
-            np.linalg.norm(command_pose[:3] - home[:3]) > 0.0001 or
-            np.linalg.norm(measured_pose[:3] - command_pose[:3]) > max_tracking_error):
-        raise RuntimeError("Guarded server did not settle near a valid home command")
-    if np.any(command_pose[:3] < workspace_min) or np.any(command_pose[:3] > workspace_max):
-        raise RuntimeError("Guarded server command is outside its workspace")
-    return (command_pose, gripper, workspace_min, workspace_max, server_radius,
-            gripper_min, gripper_max, gripper_step)
+    try:
+        client.request("RESET_TO_HOME", timeout_ms=30000)
+        deadline = time.monotonic() + 5.0
+        state = client.request("GET_STATE")
+        while True:
+            if not isinstance(state, dict) or state.get("emergency"):
+                raise RuntimeError("Guarded server reported an emergency or invalid state")
+            command_pose = np.asarray(state["ee_cmd_pose"], dtype=float)
+            measured_pose = np.asarray(state["ee_pose"], dtype=float)
+            gripper = float(state["gripper_cmd_pos"])
+            if (command_pose.shape != (6,) or not np.isfinite(command_pose).all() or
+                    measured_pose.shape != (6,) or not np.isfinite(measured_pose).all() or
+                    not math.isfinite(gripper) or
+                    gripper < gripper_min or gripper > gripper_max or
+                    np.linalg.norm(command_pose[:3] - home[:3]) > 0.0001):
+                raise RuntimeError("Guarded server returned an invalid home command")
+            if np.any(command_pose[:3] < workspace_min) or np.any(command_pose[:3] > workspace_max):
+                raise RuntimeError("Guarded server command is outside its workspace")
+            tracking_error = float(np.linalg.norm(measured_pose[:3] - command_pose[:3]))
+            if tracking_error <= max_tracking_error:
+                return (command_pose, gripper, workspace_min, workspace_max, server_radius,
+                        gripper_min, gripper_max, gripper_step)
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"Guarded server home tracking error stayed at {tracking_error:.4f} m "
+                    f"(limit {max_tracking_error:.4f} m)")
+            time.sleep(0.1)
+            state = client.request("SET_EE_POSE", {
+                "ee_pose": command_pose, "gripper_pos": gripper})
+    except BaseException:
+        try:
+            client.request("SET_TO_DAMPING")
+        except RuntimeError:
+            pass
+        raise
 
 
 def parse_args():
