@@ -58,7 +58,47 @@ geometry before autonomous manipulation.
 
 ## ZMQ Communication
 
-### Quest ROS 2 Bring-up (Steps 3-6)
+### Quest Dual-Arm Joint Teleoperation
+
+On this machine, right is `X5_umi/can0` and left is `X5/can1`. The Quest
+app sends ROS-TCP to `192.168.31.137:10000`. Stop any existing
+`quest_ros_tcp.py`, `vr_receiver.py`, or other program using port 10000,
+and stop other controllers using either CAN interface. No ROS node or
+official X5 VR controller is needed for this path.
+
+In terminal 1:
+
+```bash
+conda activate arx5
+cd /home/hjadmin/projects/arx5-sdk/python
+python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764
+```
+
+In terminal 2:
+
+```bash
+conda activate arx5
+cd /home/hjadmin/projects/arx5-sdk/python
+python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
+```
+
+Open or reconnect the Quest app after the bridge starts. Once both controller
+streams arrive, the bridge resets both arms to SDK home (the arms sweep and
+the grippers open), then anchors each current hand pose to its measured arm
+pose. Moving a hand while its pose counter advances moves the corresponding
+arm; each side trigger controls its gripper independently. A stationary pose
+counter holds the arm target and the next moving pose reanchors it. The
+counter is an observed tracking signal, not a verified trigger bit.
+
+This path sends finite IK solutions within the SDK joint limits through the
+joint controllers. It has no extra workspace radius or 0.02 m/s Cartesian
+speed cap; target joint steps use the SDK model's joint velocity limits.
+Unreachable poses stop advancing at the IK boundary. A missing Quest packet
+or connection stops both arms, and Ctrl+C requests damping. The servers also
+switch to damping after two seconds without accepted targets. Keep the
+homing and motion paths clear; these limits do not prevent collisions.
+
+### Quest ROS 2 Diagnostics (Optional)
 
 The installed Quest app has been observed sending Unity ROS-TCP
 `arm_control/PosCmd` packets over Wi-Fi to `192.168.31.137:10000`. On this host,
@@ -182,7 +222,7 @@ The advancing counter is a pose-freshness check, not yet a verified trigger
 state. The vendor serial node does not populate `time_count` or a dedicated
 trigger field.
 
-### Quest Single-Arm Teleoperation (Steps 7-8)
+### Quest Single-Arm Guarded Teleoperation (Optional)
 
 On this setup, the right arm is `X5_umi / can0`, and its SDK home XYZ is
 `(0.3202, 0.0010, 0.1565)` m. The commands below allow targets up to 50 cm
@@ -295,10 +335,10 @@ Do not interpret raw VR pose values as joint positions.
 
 ### Joint Position Server
 
-From `python/` in the `arx5` environment, replace the Cartesian server with:
+From `python/` in the `arx5` environment, run:
 
 ```bash
-python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764 --timeout-action hold
+python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764
 ```
 
 For this dual-arm setup, can0/8765 is the right arm and can1/8764 is the left
@@ -313,10 +353,9 @@ two arms' motion clocks.
 
 | Command | Request data | Reply data |
 | --- | --- | --- |
-| `GET_STATE` | `None` | Existing state fields plus `armed`, `holding`, `timeout_action` and `emergency` |
+| `GET_STATE` | `None` | Existing state fields plus `armed` and `emergency` |
 | `RESET_TO_HOME` | `None` | `"OK"`; moves home, opens gripper, enables joint commands |
 | `SET_JOINT_POS` | `{"joint_pos": six_joint_angles, "gripper_pos": width}` | Robot state |
-| `HOLD_POSITION` | `None` | `"OK"`; holds measured joints and gripper, disables new joint commands |
 | `SET_TO_DAMPING` | `None` | `"OK"`; disables joint commands |
 
 Angles are absolute ARX5 joint positions in radians, in SDK motor order;
@@ -337,18 +376,13 @@ right.set_joint_pos(state["joint_pos"], state["gripper_pos"])
 
 Send targets continuously after reset. By default, 2 seconds without an
 accepted joint target switches to damping and requires another explicit reset.
-Use `--timeout-action hold` for VR: an expired command deadline instead holds
-the measured position and requires another explicit reset. `GET_STATE` and
-rejected commands do not refresh this deadline. An SDK emergency still forces
+`GET_STATE` and rejected commands do not refresh this deadline. An SDK emergency still forces
 damping, and server shutdown uses SDK damping/passive behavior rather than
 leaving a powered position hold behind.
 
-Targets must be finite and inside SDK joint/gripper limits. Defaults reject
-changes exceeding 0.1 rad per joint or 0.005 m gripper width, relative to both
-measured state and the previous accepted target. Targets use a 0.1 s SDK linear
-interpolation horizon, with additional delta limits based on SDK velocity
-limits. These checks are not collision avoidance or a full trajectory safety
-guarantee. Use `--help` for `--timeout`, `--duration`, and step limits.
+Targets must be finite and inside SDK joint/gripper limits. The default SDK
+interpolation horizon is 0.05 s, and the SDK applies its model joint and
+gripper velocity limits. Use `--help` for `--timeout` and `--duration`.
 
 ALOHA joint outputs still need an explicitly validated mapping to ARX5 motor
 order, signs, offsets and gripper units. A 14-dimensional dual-arm array alone
