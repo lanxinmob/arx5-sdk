@@ -159,14 +159,21 @@ It does not open CAN, reset an arm, or send robot commands. Run with
 `--side left` to inspect the left topic. If the official topic reports XYZ in
 millimeters, add `--input-meters-per-unit 0.001` after confirming it from live
 samples. `--xyz-map` lists the Quest source for robot X,Y,Z; for example,
-`--xyz-map 0,-x,0` previews Quest +X as robot -Y while leaving robot X and Z
+`--xyz-map 0,y,0` previews Quest -Y as robot -Y while leaving robot X and Z
 fixed. The default `x,y,z` preserves the original preview behavior; it is not
 a calibrated robot frame. Check the frame directions, units, gripper range and
 trigger behavior from live Quest data before enabling any X5 motion. In the observed
 Wi-Fi stream, `time_count` advanced with new poses and stayed fixed while the
-last pose was repeated; gripper values could still change independently. This
-is a pose-freshness check, not yet a verified trigger state. The vendor serial
-node does not populate `time_count` or a dedicated trigger field.
+last pose was repeated; gripper values could still change independently. In a
+rightward-and-return trial on this headset, Quest Y fell by about 0.17 source
+units on the outward leg and rose on return, identifying Quest -Y as body-right
+for this setup. X/Z and RPY also changed, so robot base-frame direction,
+orientation mapping, and exact source units remain unverified. Replaying the
+logged samples with one source unit treated as one meter and a 2 mm target
+radius reached the limit at `--scale 0.02`; `--scale 0.01` stayed within it.
+The advancing counter is a pose-freshness check, not yet a verified trigger
+state. The vendor serial node does not populate `time_count` or a dedicated
+trigger field.
 
 ### Quest Single-Arm XYZ (Steps 7-8)
 
@@ -214,14 +221,14 @@ source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
 cd /home/hjadmin/projects/arx5-sdk
 /usr/bin/python3 python/communication/quest_arx5_bridge.py \
   --mode control --side right --model X5_umi --interface can0 \
-  --reset-to-home --scale 0.02 --xyz-map 0,0,0 \
+  --reset-to-home --scale 0.01 --xyz-map 0,0,0 \
   --speed 0.002 --radius 0.002
 ```
 
 Only after verifying the Quest and robot directions with live observations,
 stop both processes, restart the guarded server, and replace the axis map with
-one enabled axis, for example `--xyz-map 0,-x,0` if Quest +X is verified as
-body-right and robot -Y is the intended sideways direction. Repeat for the
+one enabled axis, for example `--xyz-map 0,y,0` if robot -Y is verified as
+the intended body-right direction. Repeat for the
 other axes before combining them. Control mode requires explicit mapping,
 scale, speed, radius and interface; it caps this initial stage at 0.01 m/s and
 a 0.02 m home radius. The recommended first trial is only 2 mm because offline
