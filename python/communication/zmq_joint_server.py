@@ -16,19 +16,16 @@ sys.path.insert(0, str(ROOT))
 
 
 class JointServer:
-    def __init__(self, sdk, controller, robot, *, timeout=2.0, max_step=0.1,
-                 max_gripper_step=0.005, duration=0.1):
-        for value in (timeout, max_step, max_gripper_step, duration):
+    def __init__(self, sdk, controller, robot, *, timeout=2.0, duration=0.05):
+        for value in (timeout, duration):
             if not np.isfinite(value) or value <= 0:
-                raise ValueError("Timeout, limits and duration must be positive and finite")
+                raise ValueError("Timeout and duration must be positive and finite")
         if duration >= timeout:
             raise ValueError("Duration must be shorter than timeout")
         self.sdk, self.controller, self.robot = sdk, controller, robot
-        self.timeout, self.max_step = timeout, max_step
-        self.max_gripper_step, self.duration = max_gripper_step, duration
+        self.timeout, self.duration = timeout, duration
         self.armed = False
         self.last_action = 0.0
-        self.last_target = None
 
     def state(self):
         joint = self.controller.get_joint_state()
@@ -43,7 +40,6 @@ class JointServer:
 
     def disarm(self):
         self.armed = False
-        self.last_target = None
         self.controller.set_to_damping()
 
     def check_timeout(self):
@@ -69,22 +65,11 @@ class JointServer:
             raise ValueError("Joint position outside SDK limits")
         if not 0 <= gripper <= self.robot.gripper_width:
             raise ValueError("Gripper outside SDK limits (meters)")
-        state = self.controller.get_joint_state()
-        actual = np.r_[state.pos(), state.gripper_pos]
-        target = np.r_[position, gripper]
-        if not np.isfinite(actual).all():
-            raise ValueError("Nonfinite robot feedback")
-        limits = np.r_[np.minimum(self.max_step, self.robot.joint_vel_max * self.duration),
-                       min(self.max_gripper_step, self.robot.gripper_vel_max * self.duration)]
-        for reference in (actual, self.last_target):
-            if reference is not None and np.any(np.abs(target - reference) > limits + 1e-9):
-                raise ValueError("Target jump exceeds step or velocity limit")
         command = self.sdk.JointState(self.robot.joint_dof)
         command.pos()[:] = position
         command.gripper_pos = gripper
         command.timestamp = self.controller.get_timestamp() + self.duration
         self.controller.set_joint_cmd(command)
-        self.last_target = target.copy()
         self.last_action = time.monotonic()
         return self.state()
 
@@ -100,12 +85,10 @@ class JointServer:
                 data = self.state()
             elif cmd == "RESET_TO_HOME":
                 self.armed = False
-                self.last_target = None
                 self.controller.reset_to_home()
+                time.sleep(0.55)
                 if self.controller.is_emergency():
                     raise ValueError("SDK emergency during reset")
-                state = self.controller.get_joint_state()
-                self.last_target = np.r_[state.pos(), state.gripper_pos]
                 self.last_action = time.monotonic()
                 self.armed = True
                 data = "OK"
@@ -126,7 +109,7 @@ class JointServer:
             return {"cmd": cmd, "data": f"ERROR: {error}"}
 
 
-def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, duration):
+def serve(model, interface, port, bind, timeout, duration):
     # SDK URDF paths are relative to python/.
     os.chdir(ROOT)
     import arx5_interface as sdk
@@ -145,8 +128,7 @@ def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, dur
             socket.bind(f"tcp://{bind}:{port}")
             try:
                 controller = sdk.Arx5JointController(robot, config, interface)
-                server = JointServer(sdk, controller, robot, timeout=timeout, max_step=max_step,
-                                     max_gripper_step=max_gripper_step, duration=duration)
+                server = JointServer(sdk, controller, robot, timeout=timeout, duration=duration)
                 print(f"Joint server: {model} {interface} at {bind}:{port}; awaiting RESET_TO_HOME", flush=True)
                 while True:
                     server.check_timeout()
@@ -167,10 +149,8 @@ def serve(model, interface, port, bind, timeout, max_step, max_gripper_step, dur
 @click.option("--port", "ports", multiple=True, type=click.IntRange(1, 65535))
 @click.option("--bind", default="127.0.0.1", show_default=True)
 @click.option("--timeout", default=2.0, type=float, show_default=True)
-@click.option("--max-step", default=0.1, type=float, show_default=True, help="Maximum joint target delta, radians.")
-@click.option("--max-gripper-step", default=0.005, type=float, show_default=True, help="Maximum gripper target delta, meters.")
-@click.option("--duration", default=0.1, type=float, show_default=True, help="SDK interpolation horizon, seconds.")
-def main(arms, ports, bind, timeout, max_step, max_gripper_step, duration):
+@click.option("--duration", default=0.05, type=float, show_default=True, help="SDK interpolation horizon, seconds.")
+def main(arms, ports, bind, timeout, duration):
     """Run one independent joint-position service per arm."""
     if len(arms) % 2:
         raise click.UsageError("Provide MODEL INTERFACE pairs")
@@ -181,8 +161,8 @@ def main(arms, ports, bind, timeout, max_step, max_gripper_step, duration):
         raise click.UsageError("Provide one unique --port per arm")
     if len(set(arms[1::2])) != len(pairs):
         raise click.UsageError("CAN interfaces must be unique")
-    if any(not np.isfinite(v) or v <= 0 for v in (timeout, max_step, max_gripper_step, duration)) or duration >= timeout:
-        raise click.UsageError("Limits must be positive and finite; duration must be less than timeout")
+    if any(not np.isfinite(v) or v <= 0 for v in (timeout, duration)) or duration >= timeout:
+        raise click.UsageError("Timeout and duration must be positive and finite; duration must be less than timeout")
 
     def interrupt(signum, frame):
         raise KeyboardInterrupt
@@ -191,13 +171,12 @@ def main(arms, ports, bind, timeout, max_step, max_gripper_step, duration):
     children = []
     try:
         if len(pairs) == 1:
-            serve(*pairs[0], ports[0], bind, timeout, max_step, max_gripper_step, duration)
+            serve(*pairs[0], ports[0], bind, timeout, duration)
         else:
             for (model, interface), port in zip(pairs, ports):
                 children.append(subprocess.Popen([
                     sys.executable, "-u", str(Path(__file__).resolve()), model, interface,
                     "--port", str(port), "--bind", bind, "--timeout", str(timeout),
-                    "--max-step", str(max_step), "--max-gripper-step", str(max_gripper_step),
                     "--duration", str(duration),
                 ], start_new_session=True))
             while True:
