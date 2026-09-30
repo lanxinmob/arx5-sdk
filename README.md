@@ -90,6 +90,13 @@ arm; each side trigger controls its gripper independently. A stationary pose
 counter holds the arm target and the next moving pose reanchors it. The
 counter is an observed tracking signal, not a verified trigger bit.
 
+The SDK holds the gripper at its measured contact width when motor torque
+reaches half the model's overcurrent limit (0.75 Nm for X5), with 1 mm of
+opening relief. It stays there while the trigger asks for more force; move
+the trigger toward opening by at least 0.5 mm of gripper width to release
+the hold. The original 1.5 Nm overcurrent emergency remains active for
+faults the contact hold cannot prevent.
+
 This path sends finite IK solutions within the SDK joint limits through the
 joint controllers. It has no extra workspace radius or 0.02 m/s Cartesian
 speed cap; target joint steps use the SDK model's joint velocity limits.
