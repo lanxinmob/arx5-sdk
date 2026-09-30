@@ -254,6 +254,12 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
         stop.set()
     finally:
         try:
+            if ready.is_set():
+                print(f"{side}: slow return to home", flush=True)
+                client.request("RETURN_TO_HOME", timeout=35000)
+        except Exception as error:
+            print(f"{side}: return to home failed: {error}", flush=True)
+        try:
             client.request("SET_TO_DAMPING", timeout=2000)
         except Exception as error:
             print(f"{side}: damping request failed: {error}", flush=True)

@@ -13,6 +13,8 @@ import zmq
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+HOME_SPEED = 0.4  # Maximum planned joint speed in rad/s during return to home.
+HOME_TOLERANCE = 0.05
 
 
 class JointServer:
@@ -43,9 +45,70 @@ class JointServer:
         self.controller.set_to_damping()
 
     def check_timeout(self):
-        if self.armed and (self.controller.is_emergency()
-                           or time.monotonic() - self.last_action >= self.timeout):
+        if not self.armed:
+            return
+        if self.controller.is_emergency():
             self.disarm()
+        elif time.monotonic() - self.last_action >= self.timeout:
+            self.safe_return_home("command timeout")
+
+    def return_home(self):
+        if not self.armed or self.controller.is_emergency():
+            raise ValueError("Joint server is disarmed or in emergency")
+        joint = self.controller.get_joint_state()
+        start = np.asarray(joint.pos(), dtype=float).copy()
+        if start.shape != (self.robot.joint_dof,) or not np.isfinite(start).all():
+            raise ValueError("Invalid measured joints during return to home")
+        outside = np.maximum(self.robot.joint_pos_min - start,
+                             start - self.robot.joint_pos_max)
+        if np.max(outside) > 0.1:
+            raise ValueError("Measured joint too far outside SDK limits for return to home")
+        gripper = float(joint.gripper_pos)
+        if not np.isfinite(gripper):
+            raise ValueError("Invalid measured gripper during return to home")
+        gripper = float(np.clip(gripper, 0, self.robot.gripper_width))
+
+        home = np.zeros(self.robot.joint_dof)
+        if np.max(np.abs(start)) <= HOME_TOLERANCE:
+            return
+        approach = home.copy()
+        approach[2] = 0.03  # Match the SDK homing path's final joint-3 clearance.
+        for target in (approach, home):
+            measured = np.asarray(self.controller.get_joint_state().pos(), dtype=float).copy()
+            duration = max(0.5, 1.5 * np.max(np.abs(target - measured)) / HOME_SPEED)
+            command = self.sdk.JointState(self.robot.joint_dof)
+            command.pos()[:] = target
+            command.gripper_pos = gripper
+            command.timestamp = self.controller.get_timestamp() + duration
+            self.controller.set_joint_cmd(command)
+            self.last_action = time.monotonic()
+            deadline = self.last_action + duration + 2.0
+            while time.monotonic() < deadline:
+                if self.controller.is_emergency():
+                    raise ValueError("SDK emergency during return to home")
+                actual = np.asarray(self.controller.get_joint_state().pos(), dtype=float)
+                if actual.shape != target.shape or not np.isfinite(actual).all():
+                    raise ValueError("Invalid feedback during return to home")
+                if (time.monotonic() >= self.last_action + duration
+                        and np.max(np.abs(actual - target)) <= HOME_TOLERANCE):
+                    break
+                time.sleep(0.05)
+            else:
+                raise TimeoutError("Arm did not reach home")
+        print("Joint server: slow return to home complete", flush=True)
+
+    def safe_return_home(self, reason):
+        try:
+            if self.armed and not self.controller.is_emergency():
+                print(f"Joint server: slow return to home ({reason})", flush=True)
+                self.return_home()
+        except Exception as error:
+            print(f"Joint server: return to home failed ({reason}): {error}", flush=True)
+        finally:
+            try:
+                self.disarm()
+            except Exception as error:
+                print(f"Joint server: damping failed ({reason}): {error}", flush=True)
 
     def set_position(self, data):
         if not self.armed:
@@ -95,13 +158,16 @@ class JointServer:
             elif cmd == "SET_TO_DAMPING":
                 self.disarm()
                 data = "OK"
+            elif cmd == "RETURN_TO_HOME":
+                self.return_home()
+                data = "OK"
             elif cmd == "SET_JOINT_POS":
                 data = self.set_position(message.get("data"))
             else:
                 raise ValueError(f"Unsupported command: {cmd}")
             return {"cmd": cmd, "data": data}
         except Exception as error:
-            if cmd == "RESET_TO_HOME":
+            if cmd in ("RESET_TO_HOME", "RETURN_TO_HOME"):
                 try:
                     self.disarm()
                 except Exception as stop_error:
@@ -122,6 +188,7 @@ def serve(model, interface, port, bind, timeout, duration):
     # Match the teleop follower: position tracking with gravity feedforward.
     config.gravity_compensation = True
     controller = None
+    server = None
     with zmq.Context() as context:
         with context.socket(zmq.REP) as socket:
             socket.setsockopt(zmq.LINGER, 0)
@@ -140,7 +207,9 @@ def serve(model, interface, port, bind, timeout, duration):
                             continue
                         socket.send_pyobj(server.handle(message))
             finally:
-                if controller is not None:
+                if server is not None:
+                    server.safe_return_home("server stopping")
+                elif controller is not None:
                     controller.set_to_damping()
 
 
@@ -192,7 +261,7 @@ def main(arms, ports, bind, timeout, duration):
                 child.send_signal(signal.SIGINT)
         for child in children:
             try:
-                child.wait(timeout=5)
+                child.wait(timeout=40)
             except subprocess.TimeoutExpired:
                 child.kill()
                 child.wait()
