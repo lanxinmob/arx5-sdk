@@ -92,6 +92,7 @@ class Sample:
     received: float
     changed: float
     generation: int
+    epoch: int
 
 
 class Inputs:
@@ -100,11 +101,13 @@ class Inputs:
         self.lock = threading.Lock()
         self.samples = {}
         self.generation = 0
+        self.epochs = {}
 
     def new_session(self):
         with self.lock:
             self.generation += 1
             self.samples.clear()
+            self.epochs.clear()
 
     def receive(self, topic, message_type, payload):
         side = {"ARX_VR_R": "right", "ARX_VR_L": "left"}.get(topic.lstrip("/"))
@@ -120,10 +123,13 @@ class Inputs:
         now = time.monotonic()
         with self.lock:
             previous = self.samples.get(side)
+            epoch = self.epochs.get(side, 0)
             if previous is not None and counter < previous.counter:
-                raise ValueError(f"{side}: Quest counter reset")
+                epoch += 1
+                self.epochs[side] = epoch
+                print(f"{side}: Quest counter reset {previous.counter} -> {counter}; realigning", flush=True)
             changed = previous.changed if previous is not None and counter == previous.counter else now
-            self.samples[side] = Sample(pose, gripper, counter, now, changed, self.generation)
+            self.samples[side] = Sample(pose, gripper, counter, now, changed, self.generation, epoch)
 
     def get(self, side):
         with self.lock:
@@ -143,6 +149,7 @@ class Planner:
         self.pose = vector(solver.forward_kinematics(self.q), 6)
         self.anchor_eef, self.anchor_vr = self.pose.copy(), sample.pose.copy()
         self.holding = True
+        self.epoch = sample.epoch
         self.status = "aligned"
         self.last_step = time.monotonic()
 
@@ -175,6 +182,9 @@ class Planner:
         actual_pose = vector(self.solver.forward_kinematics(actual_q), 6)
         gripper = self.robot.gripper_width * sample.gripper / 5
         now = time.monotonic()
+        if sample.epoch != self.epoch:
+            self.holding = True
+            self.epoch = sample.epoch
         if now - sample.changed > self.args.hold_timeout:
             self.holding, self.status = True, "holding (Quest pose unchanged)"
             return self.q.copy(), gripper
