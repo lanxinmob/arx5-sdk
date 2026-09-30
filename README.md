@@ -146,15 +146,19 @@ LD_LIBRARY_PATH="$ARX5_ENV/lib:$LD_LIBRARY_PATH" PYTHONPATH="$PWD/python:$PYTHON
 The preview uses the model's zero-joint FK pose as its starting point, anchors
 the first Quest sample, scales relative XYZ motion, and prints a speed- and
 radius-limited Cartesian target. RPY and gripper targets stay at their home
-values. It holds the target on stale input and reanchors after large position jumps.
+values. On the Wi-Fi path, repeated packets with an unchanged nonzero
+`time_count` do not refresh pose age; after `--timeout`, the preview holds its
+target and reanchors on the next pose update. It also reanchors after large
+position jumps.
 It does not open CAN, reset an arm, or send robot commands. Run with
 `--side left` to inspect the left topic. If the official topic reports XYZ in
 millimeters, add `--input-meters-per-unit 0.001` after confirming it from live
 samples. The frame directions, units, gripper range and trigger behavior must
-be checked from live Quest data before enabling any X5 motion. The observed
-Wi-Fi stream includes `time_count`, but its value stayed constant while the
-app was idle; it has not been validated as a clutch signal. The vendor serial
-node does not populate that field or a dedicated trigger field.
+be checked from live Quest data before enabling any X5 motion. In the observed
+Wi-Fi stream, `time_count` advanced with new poses and stayed fixed while the
+last pose was repeated; gripper values could still change independently. This
+is a pose-freshness check, not yet a verified trigger state. The vendor serial
+node does not populate `time_count` or a dedicated trigger field.
 
 ### Quest VR Connection Diagnostics
 
@@ -178,7 +182,7 @@ with leading slashes), as observed from the APK. Its ROS2 `arm_control/PosCmd`
 messages are 240 bytes: a four-byte CDR header, 25 float64s and nine int32s.
 The receiver displays decoded `pos_cmd` fields, including pose, raw gripper,
 mode1/mode2, temporary arrays and time_count. Gripper values are not SDK meters;
-the observed raw value of 5 must not be passed directly to `set_joint_pos`.
+the observed raw range was 0-5 and must not be passed directly to `set_joint_pos`.
 The output also includes the advertised message type and up to 128 payload
 bytes in hex, at most once per second per topic. Use Ctrl+C
 to stop. It listens on all IPv4 interfaces at port 10000; use only on a
