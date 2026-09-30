@@ -96,8 +96,8 @@ class Sample:
 
 
 class Inputs:
-    def __init__(self, protocol, timeout):
-        self.protocol, self.timeout = protocol, timeout
+    def __init__(self, timeout):
+        self.timeout = timeout
         self.lock = threading.Lock()
         self.samples = {}
         self.generation = 0
@@ -115,7 +115,7 @@ class Inputs:
             return
         if message_type != "arm_control/PosCmd":
             raise ValueError(f"{side}: unexpected Quest message type {message_type!r}")
-        data = decode_pos_cmd(payload, self.protocol)
+        data = decode_pos_cmd(payload)
         pose = vector([data[key] for key in POSE_FIELDS], 6)
         gripper, counter = float(data["gripper"]), int(data["time_count"])
         if not 0 <= gripper <= 5:
@@ -276,8 +276,7 @@ def receive_session(listener, inputs, stop, active, failed):
             connection.settimeout(0.2)
             print(f"Quest connected: {address}", flush=True)
             try:
-                inspect_connection(connection, "ROS2", inputs.receive, report=False,
-                                   stop_event=stop, wait_on_timeout=True)
+                inspect_connection(connection, inputs.receive, stop)
             except (OSError, EOFError, ValueError) as error:
                 if stop.is_set():
                     return
@@ -321,7 +320,7 @@ def main():
     os.chdir(ROOT)
     import arx5_interface as sdk
 
-    inputs = Inputs("ROS2", args.input_timeout)
+    inputs = Inputs(args.input_timeout)
     stop, active, start, failed = (threading.Event() for _ in range(4))
     workers = []
 
