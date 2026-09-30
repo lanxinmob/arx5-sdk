@@ -87,7 +87,7 @@ class Arx5AgentSafeServer:
         self.zmq_port = zmq_port
         self.no_cmd_timeout = float(no_cmd_timeout)
         self.reset_settle_time = float(reset_settle_time)
-        self.last_message_time = time.monotonic()
+        self.last_command_time = time.monotonic()
         self._closed = False
         print(f"Arx5AgentSafeServer initialized with {model} on {interface}")
 
@@ -114,14 +114,14 @@ class Arx5AgentSafeServer:
 
     def _handle_timeout(self) -> None:
         was_armed = self.guard.armed
-        self.guard.disarm()
         if was_armed:
+            self.guard.disarm()
             print(
-                f"Timeout: no message for {self.no_cmd_timeout:.3f}s; "
+                f"Timeout: no accepted pose command for {self.no_cmd_timeout:.3f}s; "
                 "setting damping and requiring RESET_TO_HOME"
             )
             self.controller.set_to_damping()
-        self.last_message_time = time.monotonic()
+        self.last_command_time = time.monotonic()
 
     def _handle_set_ee_pose(self, data: Any) -> None:
         try:
@@ -140,6 +140,7 @@ class Arx5AgentSafeServer:
             return
 
         self.guard.accept(action)
+        self.last_command_time = time.monotonic()
         self.socket.send_pyobj({"cmd": "SET_EE_POSE", "data": self._state_data()})
 
     def _handle_reset_to_home(self) -> None:
@@ -149,6 +150,7 @@ class Arx5AgentSafeServer:
             time.sleep(self.reset_settle_time)
         reset_cmd = self.controller.get_eef_cmd()
         self.guard.arm(reset_cmd.pose_6d().copy(), reset_cmd.gripper_pos)
+        self.last_command_time = time.monotonic()
         self.socket.send_pyobj({"cmd": "RESET_TO_HOME", "data": "OK"})
 
     def _validate_gain_vector(self, value: Any, name: str) -> np.ndarray:
@@ -257,11 +259,13 @@ class Arx5AgentSafeServer:
         print(f"Arx5AgentSafeServer running on {self.zmq_ip}:{self.zmq_port}")
         try:
             while True:
-                elapsed = time.monotonic() - self.last_message_time
-                remaining = max(0.0, self.no_cmd_timeout - elapsed)
+                elapsed = time.monotonic() - self.last_command_time
+                remaining = self.no_cmd_timeout - elapsed
+                if remaining <= 0:
+                    self._handle_timeout()
+                    continue
                 events = dict(self.poller.poll(max(1, int(remaining * 1000))))
                 if self.socket not in events:
-                    self._handle_timeout()
                     continue
 
                 message = self.socket.recv_pyobj()
@@ -276,10 +280,6 @@ class Arx5AgentSafeServer:
                     )
                     print(_exception_text())
                     self._send_error(cmd, str(exc))
-                finally:
-                    # Command handling such as RESET_TO_HOME can be blocking.
-                    # Start the watchdog window after the reply is produced.
-                    self.last_message_time = time.monotonic()
         except KeyboardInterrupt:
             pass
         finally:

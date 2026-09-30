@@ -194,7 +194,8 @@ in meters. Both bounds must contain the SDK home pose printed by the target
 preview and cover only a physically clear region. The guarded server checks
 each command against these bounds, a 1 mm per-command position step and a
 10 mm home radius. Its default two-second command watchdog switches to SDK
-damping if the bridge stops; damping is not power removal or a position hold.
+damping if accepted pose commands stop; state queries and rejected commands
+do not extend that deadline. Damping is not power removal or a position hold.
 
 In another terminal, with the Quest publisher still running, source ROS and
 start with every translation axis disabled. The bridge waits for three
