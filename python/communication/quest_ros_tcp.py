@@ -72,11 +72,11 @@ def main():
                 except socket.timeout:
                     continue
                 with connection:
-                    connection.settimeout(1.0)
+                    connection.settimeout(5.0)
                     print(f"Quest connected: {address}", flush=True)
                     try:
                         inspect_connection(connection, "ROS2", publish, report=False,
-                                           stop_event=RosShutdown(), wait_on_timeout=True)
+                                           stop_event=RosShutdown())
                     except (OSError, EOFError, ValueError) as error:
                         print(f"Quest disconnected: {error}", flush=True)
     except KeyboardInterrupt:
