@@ -1,72 +1,14 @@
 # C++ && Python Controller for ARX5 Robot Arm
 
-## Patched Local Controller
+## Quest Dual-Arm Teleoperation
 
-The local controller now latches state/overcurrent faults without blocking
-state queries or shutdown. `is_emergency()` reports the latch; joint commands,
-Cartesian commands, gain changes and homing are rejected until a new controller
-is created after the physical fault is resolved. Fault output is damping only,
-without position or gravity feedforward torque. This is not power removal or
-a certified emergency stop; an unsupported arm may settle under gravity.
+On this machine, the right arm is `X5_umi/can0` and the left arm is `X5/can1`.
+The Quest app sends both controller streams to `192.168.31.137:10000` over
+Wi-Fi. The two commands below are the complete host-side workflow; do not run
+another controller on either CAN interface or another receiver on port 10000.
+Use the local `arx5` environment and the locally built `arx5_interface` module.
 
-Failed Cartesian IK is rejected before changing the trajectory. Python state
-and gain array views retain their owning objects, including views obtained
-from temporary `get_joint_state()` and `get_eef_state()` results.
-
-Build on this robot host using the existing `arx5` environment and Eigen 3.4:
-
-```bash
-conda activate arx5
-cd /home/hjadmin/projects/arx5-sdk
-cmake -S . -B build \
-  -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
-  -DEigen3_DIR=/usr/share/eigen3/cmake \
-  -DPython3_EXECUTABLE="$CONDA_PREFIX/bin/python" \
-  -DPYTHON_EXECUTABLE="$CONDA_PREFIX/bin/python" \
-  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-cmake --build build --target arx5_interface -j 4
-PYTHONPATH="$PWD/python" python -c \
-  'import arx5_interface as a; print(a.__file__); assert hasattr(a.Arx5JointController, "is_emergency")'
-```
-
-The printed module must be the `.so` under this repository's `python/`, not
-the older installed wheel. Eigen 5 is ABI-incompatible with the prebuilt
-solver. The guarded server selects the local module and refuses an unpatched
-one; its `GET_STATE` response includes `emergency`.
-Cartesian ZMQ servers also return `ee_cmd_pose` and `gripper_cmd_pos` alongside
-the measured pose and gripper state. UMI clients use the command values after
-`RESET_TO_HOME` to initialize their hold target against the guarded server's
-command limit.
-
-The task arm here is `X5_umi / can0`; `can1` is the demonstration arm. Start
-`python/communication/zmq_server_agent_safe.py X5_umi can0` with measured
-`--workspace-min X Y Z` and `--workspace-max X Y Z` bounds. Initialization
-enables hardware; `RESET_TO_HOME` moves the arm and opens the gripper. Do not
-start another controller on the same bus. Close the gripper while powered off
-before a power cycle; do not bypass an out-of-range reading by changing its
-zero or calibration sign.
-
-Recovery verification: offline fault injection covered invalid initialization,
-gripper range, overcurrent, non-finite feedback, negative joint outliers, IK
-rejection and clean shutdown. On `can0`, a 2 mm upward target produced about
-0.59 mm measured travel, followed by a return within 0.024 mm of the baseline.
-This verifies basic movement, not accurate 2 mm or full six-axis tracking.
-The temporary live probe independently checked incoming CAN frame freshness;
-SDK state timestamps alone do not prove fresh motor feedback. Keep a physical
-stop available and validate telemetry freshness, tracking and workspace
-geometry before autonomous manipulation.
-
-## ZMQ Communication
-
-### Quest Dual-Arm Joint Teleoperation
-
-On this machine, right is `X5_umi/can0` and left is `X5/can1`. The Quest
-app sends ROS-TCP to `192.168.31.137:10000`. Stop any existing
-`quest_ros_tcp.py`, `vr_receiver.py`, or other program using port 10000,
-and stop other controllers using either CAN interface. No ROS node or
-official X5 VR controller is needed for this path.
-
-In terminal 1:
+In terminal 1, start the joint servers:
 
 ```bash
 conda activate arx5
@@ -74,7 +16,7 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764
 ```
 
-In terminal 2:
+In terminal 2, start the Quest bridge:
 
 ```bash
 conda activate arx5
@@ -82,354 +24,39 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
 ```
 
-Open or reconnect the Quest app after the bridge starts. Once both controller
-streams arrive, the bridge resets both arms to SDK home (the arms sweep and
-the grippers open), then anchors each current hand pose to its measured arm
-pose. Moving a hand while its pose counter advances moves the corresponding
-arm; each side trigger controls its gripper independently. A stationary pose
-counter holds the arm target and the next moving pose reanchors it. The
-counter is an observed tracking signal, not a verified trigger bit.
+Open or reconnect the Quest app after the bridge starts. Once both hand
+streams arrive, the bridge moves both arms to SDK home and opens the grippers.
+Keep their full homing paths clear. It then anchors each current hand pose to
+the measured arm pose. Hand movement updates the corresponding arm's
+end-effector target; each side trigger controls its gripper. This is end-effector
+pose mapping, not human shoulder/elbow retargeting. The observed Quest pose
+counter gates arm movement; it has not been verified as a trigger signal.
 
-The SDK holds the gripper at its measured contact width when motor torque
-reaches half the model's overcurrent limit (0.75 Nm for X5), with 1 mm of
-opening relief. It stays there while the trigger asks for more force; move
-the trigger toward opening by at least 0.5 mm of gripper width to release
-the hold. The original 1.5 Nm overcurrent emergency remains active for
-faults the contact hold cannot prevent.
+The bridge runs inverse kinematics with the SDK model, sends valid joint
+targets through localhost ZMQ, and steps them within the SDK joint velocity
+limits. It has no additional workspace-radius or Cartesian speed cap.
+Unreachable poses hold at the IK boundary. If Quest packets stop or a measured
+joint crosses the SDK limit, the bridge exits and requests damping; the joint
+servers also disarm after two seconds without accepted targets. Ctrl+C stops
+each program. Damping does not remove power or prevent collisions.
 
-This path sends finite IK solutions within the SDK joint limits through the
-joint controllers. It has no extra workspace radius or 0.02 m/s Cartesian
-speed cap; target joint steps use the SDK model's joint velocity limits.
-Unreachable poses stop advancing at the IK boundary. A missing Quest packet
-or connection stops both arms, and Ctrl+C requests damping. The servers also
-switch to damping after two seconds without accepted targets. Keep the
-homing and motion paths clear; these limits do not prevent collisions.
+The locally patched SDK holds a blocked gripper at its measured contact width
+at 0.75 Nm and relieves the command by 1 mm. Open by at least 0.5 mm to release
+the hold. The SDK's 1.5 Nm overcurrent emergency remains active.
 
-### Quest ROS 2 Diagnostics (Optional)
-
-The installed Quest app has been observed sending Unity ROS-TCP
-`arm_control/PosCmd` packets over Wi-Fi to `192.168.31.137:10000`. On this host,
-`quest_ros_tcp.py` publishes them as ROS 2 `/ARX_VR_R` and `/ARX_VR_L`; it never
-opens CAN or starts an X5 controller. The official `serial_port_node` is an
-alternative only when an ARX USB receiver whose by-id name contains
-`USB_Single_Serial` is connected. The two ARX USB2CAN adapters are not that
-receiver. Do not start both publishers at once. Do not run the vendor
-`ARX_VR.sh`, which also opens several topic terminals, or `port.sh`, which
-changes global udev permissions.
-
-On this Jazzy host, build the vendor message package once:
-
-```bash
-cd /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2
-source /opt/ros/jazzy/setup.bash
-env PATH=/usr/bin:/bin /usr/bin/colcon build --packages-select arm_control \
-  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
-source install/setup.bash
-```
-
-For the observed Wi-Fi path, start the local publisher from this repository
-after sourcing the vendor message package. The Quest app must target this
-host's address and TCP port 10000. Run this on a trusted LAN only:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
-cd /home/hjadmin/projects/arx5-sdk
-/usr/bin/python3 python/communication/quest_ros_tcp.py --bind 192.168.31.137
-```
-
-The publisher closes a TCP session after five seconds without incoming bytes
-and keeps listening for a new connection. If Quest sleeps, wake the headset
-and return to the app; a connected socket or increasing packet counts alone
-do not prove that controller poses are updating.
-
-If instead using the official USB receiver, first install its serial
-dependencies and build `serial_port` in the same vendor workspace:
-
-```bash
-sudo apt-get install ros-jazzy-serial-driver ros-jazzy-asio-cmake-module
-env PATH=/usr/bin:/bin /usr/bin/colcon build --packages-up-to serial_port \
-  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
-source install/setup.bash
-```
-
-Check that the USB receiver is connected before starting the vendor node:
-this version of its constructor indexes the device list even when it is
-empty. The user must have access to the serial device, usually through the
-`dialout` group. On a new host, run
-`sudo usermod -aG dialout "$USER"` once and log out/in before launching:
-
-```bash
-ls /dev/serial/by-id/*USB_Single_Serial*
-ros2 run serial_port serial_port_node
-```
-
-In a second terminal, source the same `install/setup.bash` and inspect the
-right controller first. Leave CAN controllers stopped. The vendor Quest guide
-says to unlock the app with right A+B and left X+Y together, then press both
-joystick buttons. Hold the right index trigger while slowly moving that
-controller; test the side trigger separately. Confirm that XYZ, RPY and
-gripper change and determine their units and ranges before interpreting them
-as robot commands. A stream of unchanged values does not verify controller
-tracking or the trigger mapping.
-
-```bash
-ros2 topic echo /ARX_VR_R --once
-cd /home/hjadmin/projects/arx5-sdk
-/usr/bin/python3 python/communication/quest_arx5_bridge.py --mode raw
-```
-
-For target preview, build this checkout's patched Stanford SDK for Jazzy's
-Python 3.12. The existing `arx5` environment contains Python 3.9 and its
-module cannot be imported by ROS 2 Jazzy. From this repository root:
-
-```bash
-ARX5_ENV="$HOME/miniconda3/envs/arx5"
-CONDA_PREFIX="$ARX5_ENV" cmake -S . -B build/quest-jazzy \
-  -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
-  -DCMAKE_PREFIX_PATH="$ARX5_ENV" -DEigen3_DIR=/usr/share/eigen3/cmake \
-  -DPython3_EXECUTABLE=/usr/bin/python3 -DPYTHON_EXECUTABLE=/usr/bin/python3
-CONDA_PREFIX="$ARX5_ENV" LIBRARY_PATH="$ARX5_ENV/lib" \
-  cmake --build build/quest-jazzy --target arx5_interface -j 4
-LD_LIBRARY_PATH="$ARX5_ENV/lib:$LD_LIBRARY_PATH" PYTHONPATH="$PWD/python:$PYTHONPATH" \
-  /usr/bin/python3 python/communication/quest_arx5_bridge.py \
-  --mode target --side right --model X5_umi --scale 0.01 \
-  --xyz-map 0,y,0 --speed 0.002 --radius 0.002
-```
-
-The preview uses the model's zero-joint FK pose as its starting point, anchors
-the first Quest sample, scales relative XYZ motion, and prints a speed- and
-radius-limited Cartesian target. RPY and gripper targets stay at their home
-values. On the Wi-Fi path, repeated packets with an unchanged nonzero
-`time_count` do not refresh pose age; after `--timeout`, the preview holds its
-target and reanchors on the next pose update. It also reanchors after large
-position jumps.
-It does not open CAN, reset an arm, or send robot commands. Run with
-`--side left` to inspect the left topic. If the official topic reports XYZ in
-millimeters, add `--input-meters-per-unit 0.001` after confirming it from live
-samples. `--xyz-map` lists the Quest source for robot X,Y,Z; for example,
-`--xyz-map 0,y,0` previews Quest -Y as robot -Y while leaving robot X and Z
-fixed. The default `x,y,z` preserves the original preview behavior; it is not
-a calibrated robot frame. Check the frame directions, units, gripper range and
-trigger behavior from live Quest data before enabling any X5 motion. In the observed
-Wi-Fi stream, `time_count` advanced with new poses and stayed fixed while the
-last pose was repeated; gripper values could still change independently. In a
-rightward-and-return trial on this headset, Quest Y fell by about 0.17 source
-units on the outward leg and rose on return, identifying Quest -Y as body-right
-for this setup. X/Z and RPY also changed, so robot base-frame direction,
-orientation mapping, and exact source units remain unverified. Replaying the
-logged samples with one source unit treated as one meter and a 2 mm target
-radius reached the limit at `--scale 0.02`; `--scale 0.01` stayed within it.
-An isolated ROS 2 replay of those 1 Hz samples, interpolated to 10 Hz,
-delivered 78 messages to `--mode target`. Robot Y targets ranged from
--0.000557 to 0.001748 m around the 0.001000 m home value, and the bridge
-reported `can_connected=false`. This verifies the read-only ROS-to-target path,
-not physical robot alignment.
-The advancing counter is a pose-freshness check, not yet a verified trigger
-state. The vendor serial node does not populate `time_count` or a dedicated
-trigger field.
-
-### Quest Single-Arm Guarded Teleoperation (Optional)
-
-On this setup, the right arm is `X5_umi / can0`, and its SDK home XYZ is
-`(0.3202, 0.0010, 0.1565)` m. The commands below allow targets up to 50 cm
-from home, 0.5 rad of wrist rotation, and side-trigger gripper control. Use
-the 50 cm setting only after checking clearance for the entire arm sweep.
-The numeric box is in the robot base frame; it excludes movement below home
-and allows only 3 mm toward -X because offline IK rejected farther -X targets.
-The 50 cm radius is a command limit, not a guarantee that every pose is
-reachable. Keep the arm
-unloaded and a physical stop available. Stop other controllers on `can0`.
-`RESET_TO_HOME` first sweeps the whole arm to zero and opens the gripper;
-the Cartesian box does not constrain that sweep.
-
-Keep the Quest ROS-TCP publisher from the section above running. In a second
-terminal, start the guarded server. Its Python environment is separate from
-the ROS bridge's. The latter needs Ubuntu's `python3-zmq` and `python3-scipy`
-packages (`sudo apt-get install python3-zmq python3-scipy`):
+If the local Python module is missing or the SDK C++ sources change, rebuild
+it from the repository root:
 
 ```bash
 conda activate arx5
-cd /home/hjadmin/projects/arx5-sdk/python
-python communication/zmq_server_agent_safe.py X5_umi can0 \
-  --bind 127.0.0.1 --port 8765 --max-position-delta 0.002 \
-  --max-home-translation-radius 0.50 \
-  --workspace-min 0.317 -0.499 0.156 \
-  --workspace-max 0.820 0.501 0.657
-```
-
-In a third terminal, start full right-hand control:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
 cd /home/hjadmin/projects/arx5-sdk
-/usr/bin/python3 python/communication/quest_arx5_bridge.py \
-  --mode control --side right --model X5_umi --interface can0 \
-  --reset-to-home --wide-range --scale 1.0 --xyz-map x,y,z \
-  --rpy-map r,p,y --gripper-follow --speed 0.02 --radius 0.50
+cmake -S . -B build -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" \
+  -DEigen3_DIR=/usr/share/eigen3/cmake \
+  -DPython3_EXECUTABLE="$CONDA_PREFIX/bin/python" \
+  -DPYTHON_EXECUTABLE="$CONDA_PREFIX/bin/python" \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build --target arx5_interface -j 4
 ```
-
-The bridge waits for three advancing nonzero `time_count` values and at least
-5 mm of right-controller travel within one second before it resets or commands
-the arm. If it prints `Quest data stale`, wake and reopen X5 MR, unlock with
-right A+B and left X+Y, click both joysticks, then hold the right index trigger
-and move the controller. After changing the headset's direction, hold the right
-Meta button for two seconds to recenter. A rising packet count with a fixed
-`time_count` is still stale. At takeover, the bridge anchors the current hand
-pose to the robot home, so move gently at first and check the XYZ and wrist
-directions. Release the index trigger to hold position. The observed Quest
-rightward motion decreases source Y; `--xyz-map x,y,z` therefore sends it
-toward robot -Y. X/Z and rotation directions still need a live check on this
-physical setup; stop with Ctrl-C if any direction is wrong.
-
-Quest `gripper=5` maps to fully open and `0` to closed, matching the official
-X5 VR controller's `5 -> -3.4` gripper motor mapping. The side trigger changes
-this value independently of the pose counter. Remove `--gripper-follow` to
-hold the gripper open. The bridge limits translation to 0.02 m/s, rotation to
-0.1 rad/s, and gripper travel to 0.02 m/s; the server also limits each command
-and the XYZ box. Stale poses hold the last target, large Quest jumps reanchor,
-and a measured XYZ tracking error over 6 mm stops the bridge. The guarded
-server switches to SDK damping after two seconds without accepted commands;
-damping is not power removal or a position hold. Stop both programs when done.
-After reset, the bridge holds the home target for up to five more seconds
-until measured XYZ is within 6 mm, and requests damping if that check fails.
-
-### Quest Dual-Arm Recording (Steps 12-14, Pending)
-
-The existing `examples/record_episodes.py` records one leader/follower pair
-and at most two named camera views; it is not yet a Quest dual-arm recorder.
-Its camera capture and HDF5 writer can be reused after both arms are validated.
-On 2026-09-30, Vin 1 (`/dev/video0`) delivered a live overhead tabletop view,
-while Vin 2/3/4 returned only constant-gray frames despite reporting 60 FPS.
-Both wrist feeds need valid images before three-view collection can be verified.
-
-### Quest VR Connection Diagnostics
-
-The inspected ARX VR APK contains Unity ROS-TCP code, not the ZMQ joint
-protocol. Its serialized `ROSConnection` destination is
-`192.168.31.137:10000`. This Quest was observed connecting from
-`192.168.31.107` and sending both arm topics. Sharing Wi-Fi alone is not a
-substitute for seeing an actual TCP connection and increasing message counts.
-
-To inspect raw packets instead of publishing ROS topics, stop
-`quest_ros_tcp.py`, then run the standard-library-only diagnostic receiver
-from `python/`:
-
-```bash
-python communication/vr_receiver.py --protocol ROS2
-```
-
-Open the APK on Quest. Look for `Connected`, `__publish` registrations, and
-increasing message counts for `ARX_VR_L` and `ARX_VR_R` (possibly
-with leading slashes), as observed from the APK. Its ROS2 `arm_control/PosCmd`
-messages are 240 bytes: a four-byte CDR header, 25 float64s and nine int32s.
-The receiver displays decoded `pos_cmd` fields, including pose, raw gripper,
-mode1/mode2, temporary arrays and time_count. Gripper values are not SDK meters;
-the observed raw range was 0-5 and must not be passed directly to `set_joint_pos`.
-The output also includes the advertised message type and up to 128 payload
-bytes in hex, at most once per second per topic. Use Ctrl+C
-to stop. It listens on all IPv4 interfaces at port 10000; use only on a
-trusted LAN. A connection idle for 15 seconds is closed and may reconnect.
-The default handshake advertises ROS1; use `--protocol ROS2` only for an APK
-built for ROS2. This is a diagnostic subset of the
-[Unity ROS-TCP protocol](https://github.com/Unity-Technologies/ROS-TCP-Endpoint),
-not a ROS node; it does not provide subscriptions or services.
-
-This receiver never opens CAN, connects to ZMQ, resets, or moves the arms.
-It is **not a motion bridge**.
-Do not interpret raw VR pose values as joint positions.
-
-### Joint Position Server
-
-From `python/` in the `arx5` environment, run:
-
-```bash
-python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764
-```
-
-For this dual-arm setup, can0/8765 is the right arm and can1/8764 is the left
-arm. Stop existing controllers on those CAN buses first. The server uses the
-local SDK and the same `gripper_open_readout=-3.37472` calibration as
-`zmq_server.py`. Verify that calibration for each physical arm.
-
-The service binds to localhost by default; use `--bind` for a trusted remote
-client. The SDK protocol uses Python pickle and is not suitable for untrusted
-networks. Each arm is an independent process; this does not synchronize the
-two arms' motion clocks.
-
-| Command | Request data | Reply data |
-| --- | --- | --- |
-| `GET_STATE` | `None` | Existing state fields plus `armed` and `emergency` |
-| `RESET_TO_HOME` | `None` | `"OK"`; moves home, opens gripper, enables joint commands |
-| `SET_JOINT_POS` | `{"joint_pos": six_joint_angles, "gripper_pos": width}` | Robot state |
-| `SET_TO_DAMPING` | `None` | `"OK"`; disables joint commands |
-
-Angles are absolute ARX5 joint positions in radians, in SDK motor order;
-gripper width is in meters (0 closed, SDK `gripper_width` fully open).
-This endpoint takes one target, not a trajectory chunk. Errors return
-`{"cmd": original_command, "data": "ERROR: ..."}` and do not accept the target.
-
-The existing client now supports `set_joint_pos`:
-
-```python
-from communication.zmq_client import Arx5Client
-
-right = Arx5Client("127.0.0.1", 8765)
-right.reset_to_home()  # Moves the arm and opens the gripper.
-state = right.get_state()
-right.set_joint_pos(state["joint_pos"], state["gripper_pos"])
-```
-
-Send targets continuously after reset. By default, 2 seconds without an
-accepted joint target switches to damping and requires another explicit reset.
-`GET_STATE` and rejected commands do not refresh this deadline. An SDK emergency still forces
-damping, and server shutdown uses SDK damping/passive behavior rather than
-leaving a powered position hold behind.
-
-Targets must be finite and inside SDK joint/gripper limits. The default SDK
-interpolation horizon is 0.05 s, and the SDK applies its model joint and
-gripper velocity limits. Use `--help` for `--timeout` and `--duration`.
-
-ALOHA joint outputs still need an explicitly validated mapping to ARX5 motor
-order, signs, offsets and gripper units. A 14-dimensional dual-arm array alone
-does not establish that compatibility.
-
-From the `python/` directory, start one arm with the default port 8765:
-
-```bash
-python communication/zmq_server.py X5 can0
-```
-
-Start multiple arms with one command. Repeat `--port` once per arm; ports
-correspond to the `MODEL INTERFACE` pairs in order:
-
-```bash
-python communication/zmq_server.py X5 can0 X5 can1 --port 8765 --port 8766
-```
-
-Use the actual model for each arm (for example, `X5_umi`). Duplicate ports
-and CAN interfaces are rejected. The default bind address is `0.0.0.0`;
-add `--bind 127.0.0.1` for local connections only. Each arm runs in a separate
-child process. Ctrl+C or SIGTERM stops all children; if any child exits,
-the launcher stops the others and reports an error.
-
-One policy process can connect to both arms:
-
-```python
-from communication.zmq_client import Arx5Client
-
-left = Arx5Client("127.0.0.1", 8765)   # can0
-right = Arx5Client("127.0.0.1", 8766)  # can1
-```
-
-For a remote policy, replace `127.0.0.1` with the robot host's IP address.
-Read state and send each arm's action through its corresponding client.
-Calls are blocking request/reply operations; separate ports do not guarantee
-synchronized execution. The existing protocol requires `reset_to_home()`
-before pose commands; this moves the arm and opens its gripper.
-These launcher options apply to `zmq_server.py`; the guarded
-`zmq_server_agent_safe.py` remains a separate single-arm entry point.
 
 ## Safety-Related Configs
 

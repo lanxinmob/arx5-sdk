@@ -215,24 +215,11 @@ class Arx5Client:
         return self.set_ee_pose(ee_pose, gripper_pos)
 
     def reset_to_home(self):
-        """Move to home; also arm the joint server for subsequent commands."""
         reply_msg = self.send_recv({"cmd": "RESET_TO_HOME", "data": None})
         assert reply_msg["cmd"] == "RESET_TO_HOME"
         if reply_msg["data"] != "OK":
             raise ValueError(f"Error: {reply_msg['data']}")
         self.get_state()
-
-    def set_joint_pos(self, joint_pos: npt.NDArray[np.float64], gripper_pos: float):
-        """Send absolute joint radians and gripper meters to zmq_joint_server.py."""
-        reply = self.send_recv({
-            "cmd": "SET_JOINT_POS",
-            "data": {"joint_pos": np.asarray(joint_pos, dtype=np.float64),
-                     "gripper_pos": float(gripper_pos)},
-        })
-        if reply.get("cmd") != "SET_JOINT_POS" or not isinstance(reply.get("data"), dict):
-            raise ValueError(f"Joint command failed: {reply}")
-        self.latest_state = reply["data"]
-        return self.latest_state
 
     def set_to_damping(self):
         reply_msg = self.send_recv({"cmd": "SET_TO_DAMPING", "data": None})
