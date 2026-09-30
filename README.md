@@ -44,8 +44,12 @@ This is end-effector pose mapping, not human shoulder/elbow retargeting. The
 observed Quest pose counter gates arm movement; it is not a trigger signal.
 
 The bridge steps valid joint targets within the SDK joint velocity limits. It
-has no additional workspace-radius or Cartesian speed cap. Unreachable poses
-hold at the IK boundary. When the bridge stops, including Ctrl+C, Quest packet
+averages five IK joint targets before the velocity step by default. Use
+`--joint-average-window 1` to disable averaging or a larger value for more
+smoothing at the cost of more lag. Averaging cannot correct missing Quest poses
+or unreachable IK targets. The bridge has no additional workspace-radius or
+Cartesian speed cap. Unreachable poses hold at the IK boundary. When the bridge
+stops, including Ctrl+C, Quest packet
 loss outside a button reset, or a measured joint outside the SDK limit, it asks
 each healthy armed server to move slowly to joint zero in two waypoints, keeping
 the current gripper opening, then requests damping. A server also attempts this return

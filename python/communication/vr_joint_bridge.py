@@ -1,6 +1,7 @@
 """Drive two joint servers from the Quest ROS-TCP controller stream."""
 
 import argparse
+from collections import deque
 from dataclasses import dataclass
 import json
 import os
@@ -160,6 +161,12 @@ class Planner:
         self.epoch = sample.epoch
         self.status = "aligned"
         self.last_step = time.monotonic()
+        self.target_history = deque(maxlen=args.joint_average_window)
+        self.reset_filter()
+
+    def reset_filter(self):
+        self.target_history.clear()
+        self.target_history.extend(self.q.copy() for _ in range(self.args.joint_average_window))
 
     def measured(self, state):
         if state.get("emergency") is not False or state.get("armed") is not True:
@@ -169,16 +176,16 @@ class Planner:
             raise ValueError("Measured joint outside SDK limits")
         return q
 
-    def solve(self, desired, actual_pose, actual_q):
+    def solve(self, desired, actual_pose, seed_q):
         delta_rotation = (rotation(desired) * rotation(actual_pose).inv()).as_rotvec()
         for fraction in (1, 0.5, 0.25, 0.125, 0.0625, 0.03125):
             pose = actual_pose.copy()
             pose[:3] += fraction * (desired[:3] - actual_pose[:3])
             pose[3:] = (Rotation.from_rotvec(delta_rotation * fraction)
                         * rotation(actual_pose)).as_euler("xyz")
-            status, candidate = self.solver.inverse_kinematics(pose, actual_q)
+            status, candidate = self.solver.inverse_kinematics(pose, seed_q)
             candidate = np.asarray(candidate, dtype=float)
-            if (status == 0 and candidate.shape == actual_q.shape
+            if (status == 0 and candidate.shape == seed_q.shape
                     and np.isfinite(candidate).all()
                     and np.all(candidate >= self.robot.joint_pos_min)
                     and np.all(candidate <= self.robot.joint_pos_max)):
@@ -190,6 +197,8 @@ class Planner:
         actual_pose = vector(self.solver.forward_kinematics(actual_q), 6)
         gripper = self.robot.gripper_width * sample.gripper / 5
         now = time.monotonic()
+        elapsed = min(0.05, max(DT, now - self.last_step))
+        self.last_step = now
         if sample.epoch != self.epoch:
             self.holding = True
             self.epoch = sample.epoch
@@ -199,6 +208,7 @@ class Planner:
         if self.holding:
             self.anchor_eef, self.anchor_vr = actual_pose.copy(), sample.pose.copy()
             self.q, self.pose = actual_q.copy(), actual_pose.copy()
+            self.reset_filter()
             self.holding, self.status = False, "aligned"
         desired = mapped_pose(self.anchor_eef, self.anchor_vr, sample.pose,
                               self.frame, self.args.scale, self.args.rotation_scale)
@@ -206,17 +216,17 @@ class Planner:
                 and (rotation(desired) * rotation(actual_pose).inv()).magnitude() < 1e-6):
             self.status = "aligned"
             return self.q.copy(), gripper
-        solution, fraction = self.solve(desired, actual_pose, actual_q)
+        solution, fraction = self.solve(desired, actual_pose, self.q)
         if solution is None:
             self.holding, self.status = True, "holding (IK boundary)"
             return self.q.copy(), gripper
-        elapsed = min(0.05, max(DT, now - self.last_step))
-        delta = np.clip(solution - self.q,
+        self.target_history.append(solution.copy())
+        target = np.mean(np.stack(self.target_history), axis=0)
+        delta = np.clip(target - self.q,
                         -self.robot.joint_vel_max * elapsed,
                         self.robot.joint_vel_max * elapsed)
         self.q += delta
         self.pose = vector(self.solver.forward_kinematics(self.q), 6)
-        self.last_step = now
         self.status = "tracking" if fraction == 1 else "tracking (IK boundary)"
         return self.q.copy(), gripper
 
@@ -344,6 +354,8 @@ def parse_args():
     parser.add_argument("--port", type=int, default=10000)
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--rotation-scale", type=float, default=1.0)
+    parser.add_argument("--joint-average-window", type=int, default=5,
+                        help="IK joint targets to average (1 disables filtering)")
     for side in ("right", "left"):
         parser.add_argument(f"--{side}-frame-rpy", nargs=3, type=float,
                             default=(0, 0, 0), metavar=("ROLL", "PITCH", "YAW"))
@@ -356,6 +368,8 @@ def parse_args():
         parser.error("Scale and frame values must be finite; scale must be positive")
     if not 0 < args.hold_timeout < args.input_timeout:
         parser.error("Use 0 < hold-timeout < input-timeout")
+    if args.joint_average_window < 1:
+        parser.error("Use joint-average-window >= 1")
     if (args.right_port == args.left_port or any(
             not 1 <= port <= 65535 for port in (args.port, args.right_port, args.left_port))):
         parser.error("Use valid ports and distinct joint server ports")
