@@ -243,6 +243,8 @@ and the XYZ box. Stale poses hold the last target, large Quest jumps reanchor,
 and a measured XYZ tracking error over 6 mm stops the bridge. The guarded
 server switches to SDK damping after two seconds without accepted commands;
 damping is not power removal or a position hold. Stop both programs when done.
+After reset, the bridge holds the home target for up to five more seconds
+until measured XYZ is within 6 mm, and requests damping if that check fails.
 
 ### Quest Dual-Arm Recording (Steps 12-14, Pending)
 
