@@ -206,6 +206,18 @@ def rpy_map(value):
     return axes
 
 
+def step_gripper_target(current, raw, lower, upper, max_step,
+                        raw_closed=0.0, raw_open=5.0):
+    if not all(math.isfinite(value) for value in
+               (current, raw, lower, upper, max_step, raw_closed, raw_open)):
+        raise ValueError("Gripper values must be finite")
+    if lower > upper or max_step < 0 or raw_open == raw_closed:
+        raise ValueError("Invalid gripper limits or raw endpoints")
+    fraction = np.clip((raw - raw_closed) / (raw_open - raw_closed), 0.0, 1.0)
+    desired = lower + float(fraction) * (upper - lower)
+    return float(current + np.clip(desired - current, -max_step, max_step))
+
+
 class GuardedCartesianClient:
     def __init__(self, port):
         import zmq
@@ -256,6 +268,12 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
     server_step = float(limits["max_position_delta"])
     if not math.isfinite(server_step) or server_step > 0.002:
         raise RuntimeError("Guarded server position step must be at most 0.002 m")
+    gripper_min = float(limits["gripper_min"])
+    gripper_max = float(limits["gripper_max"])
+    gripper_step = float(limits["max_gripper_delta"])
+    if (not all(math.isfinite(v) for v in (gripper_min, gripper_max, gripper_step)) or
+            gripper_min > gripper_max or gripper_step < 0 or gripper_step > 0.002):
+        raise RuntimeError("Invalid guarded server gripper limits")
     if info.get("armed"):
         raise RuntimeError("Guarded server is already armed; restart it before Quest control")
     home = np.asarray(info["home_pose"], dtype=float)
@@ -276,12 +294,14 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
     if (command_pose.shape != (6,) or not np.isfinite(command_pose).all() or
             measured_pose.shape != (6,) or not np.isfinite(measured_pose).all() or
             not math.isfinite(gripper) or
+            gripper < gripper_min or gripper > gripper_max or
             np.linalg.norm(command_pose[:3] - home[:3]) > 0.0001 or
             np.linalg.norm(measured_pose[:3] - command_pose[:3]) > max_tracking_error):
         raise RuntimeError("Guarded server did not settle near a valid home command")
     if np.any(command_pose[:3] < workspace_min) or np.any(command_pose[:3] > workspace_max):
         raise RuntimeError("Guarded server command is outside its workspace")
-    return command_pose, gripper, workspace_min, workspace_max, server_radius
+    return (command_pose, gripper, workspace_min, workspace_max, server_radius,
+            gripper_min, gripper_max, gripper_step)
 
 
 def parse_args():
@@ -305,6 +325,12 @@ def parse_args():
                         help="Target angular speed cap in rad/s")
     parser.add_argument("--angular-radius", type=positive, default=0.5,
                         help="Target rotation cap around SDK home in radians")
+    parser.add_argument("--gripper-follow", action="store_true",
+                        help="Follow Quest side trigger (raw 0 closed, 5 open by default)")
+    parser.add_argument("--gripper-speed", type=positive, default=0.02,
+                        help="Gripper target speed cap in m/s")
+    parser.add_argument("--gripper-raw-closed", type=float, default=0.0)
+    parser.add_argument("--gripper-raw-open", type=float, default=5.0)
     parser.add_argument("--speed", type=positive, help="Target speed cap in m/s")
     parser.add_argument("--radius", type=positive, help="Target radius around SDK home in meters")
     parser.add_argument("--wide-range", action="store_true",
@@ -332,8 +358,16 @@ def parse_args():
             )
         if args.angular_speed > 0.2 or args.angular_radius > 1.0:
             parser.error("Control RPY is limited to 0.2 rad/s and 1.0 rad from home")
+        if args.gripper_speed > 0.02:
+            parser.error("Control gripper speed is limited to 0.02 m/s")
     elif args.reset_to_home:
         parser.error("--reset-to-home is only valid with --mode control")
+    if args.gripper_follow and args.mode != "control":
+        parser.error("--gripper-follow is only valid with --mode control")
+    if (not math.isfinite(args.gripper_raw_closed) or
+            not math.isfinite(args.gripper_raw_open) or
+            args.gripper_raw_closed == args.gripper_raw_open):
+        parser.error("Gripper raw endpoints must be distinct finite numbers")
     if args.scale is None:
         args.scale = 0.2
     if args.xyz_map is None:
@@ -377,6 +411,9 @@ def main():
             self.dynamic_poses = deque(maxlen=128)
             self.preview = preview
             self.gripper_hold = gripper_hold
+            self.gripper_limits = None
+            self.last_gripper_step = None
+            self.last_packet_time = None
             self.robot = None
             self.create_subscription(PosCmd, topic, self.on_message, 10)
             self.create_timer(0.1, self.report)
@@ -389,6 +426,7 @@ def main():
                 self.get_logger().warning(str(error))
                 return
             self.count += 1
+            self.last_packet_time = time.monotonic()
             if previous is not None and self.sample.counter < previous.counter:
                 self.dynamic_poses.clear()
             elif (previous is not None and self.sample.counter != 0 and
@@ -414,6 +452,15 @@ def main():
             if self.preview is not None:
                 target, status = self.preview.step(sample, now)
                 if self.robot is not None:
+                    if (args.gripper_follow and sample is not None and
+                            now - self.last_packet_time <= args.timeout):
+                        elapsed = min(max(now - self.last_gripper_step, 0.0), 0.1)
+                        lower, upper, server_step = self.gripper_limits
+                        self.gripper_hold = step_gripper_target(
+                            self.gripper_hold, sample.gripper, lower, upper,
+                            min(args.gripper_speed * elapsed, server_step),
+                            args.gripper_raw_closed, args.gripper_raw_open)
+                    self.last_gripper_step = now
                     state = self.robot.request("SET_EE_POSE", {
                         "ee_pose": target, "gripper_pos": self.gripper_hold})
                     if not isinstance(state, dict) or state.get("emergency"):
@@ -421,6 +468,10 @@ def main():
                     command_pose = np.asarray(state["ee_cmd_pose"], dtype=float)
                     if command_pose.shape != (6,) or not np.allclose(command_pose, target, atol=1e-6):
                         raise RuntimeError("Guarded server command differs from Quest target")
+                    command_gripper = float(state["gripper_cmd_pos"])
+                    if (not math.isfinite(command_gripper) or
+                            not math.isclose(command_gripper, self.gripper_hold, abs_tol=1e-6)):
+                        raise RuntimeError("Guarded server gripper command differs from Quest target")
                     measured = np.asarray(state["ee_pose"], dtype=float)
                     if (measured.shape != (6,) or not np.isfinite(measured).all() or
                             np.linalg.norm(measured[:3] - target[:3]) > args.max_tracking_error):
@@ -458,7 +509,8 @@ def main():
             rclpy.spin_once(node, timeout_sec=0.1)
             if args.mode == "control" and robot is None and node.source_ready(time.monotonic()):
                 robot = GuardedCartesianClient(args.server_port)
-                home, gripper_hold, workspace_min, workspace_max, server_radius = guarded_start(
+                (home, gripper_hold, workspace_min, workspace_max, server_radius,
+                 gripper_min, gripper_max, gripper_step) = guarded_start(
                     robot, model, args.interface, args.radius, args.max_tracking_error)
                 node.preview = CartesianPreview(home, args.scale, args.input_meters_per_unit,
                                                 args.speed, server_radius, args.timeout, args.xyz_map,
@@ -467,11 +519,14 @@ def main():
                                                 args.rotation_scale, args.angular_speed,
                                                 args.angular_radius)
                 node.gripper_hold = gripper_hold
+                node.gripper_limits = (gripper_min, gripper_max, gripper_step)
+                node.last_gripper_step = time.monotonic()
                 node.robot = robot
                 print(json.dumps({"mode": "control", "model": model,
                                   "interface": args.interface, "home_pose": home.tolist(),
                                   "gripper_hold_m": gripper_hold, "xyz_map": args.xyz_map,
                                   "rpy_map": args.rpy_map,
+                                  "gripper_follow": args.gripper_follow,
                                   "speed_m_s": args.speed, "radius_m": server_radius,
                                   "workspace_min": workspace_min.tolist(),
                                   "workspace_max": workspace_max.tolist(),
