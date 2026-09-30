@@ -173,6 +173,11 @@ for this setup. X/Z and RPY also changed, so robot base-frame direction,
 orientation mapping, and exact source units remain unverified. Replaying the
 logged samples with one source unit treated as one meter and a 2 mm target
 radius reached the limit at `--scale 0.02`; `--scale 0.01` stayed within it.
+An isolated ROS 2 replay of those 1 Hz samples, interpolated to 10 Hz,
+delivered 78 messages to `--mode target`. Robot Y targets ranged from
+-0.000557 to 0.001748 m around the 0.001000 m home value, and the bridge
+reported `can_connected=false`. This verifies the read-only ROS-to-target path,
+not physical robot alignment.
 The advancing counter is a pose-freshness check, not yet a verified trigger
 state. The vendor serial node does not populate `time_count` or a dedicated
 trigger field.
