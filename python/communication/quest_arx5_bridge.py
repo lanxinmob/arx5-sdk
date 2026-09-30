@@ -44,12 +44,19 @@ def offline_home(model):
 
 
 class CartesianPreview:
-    def __init__(self, home_pose, scale, input_meters_per_unit, speed, radius, timeout):
+    def __init__(self, home_pose, scale, input_meters_per_unit, speed, radius, timeout,
+                 xyz_map=("x", "y", "z")):
         self.home = np.asarray(home_pose, dtype=float).copy()
         if self.home.shape != (6,) or not np.isfinite(self.home).all():
             raise ValueError("Home pose must have six finite values")
         self.target = self.home.copy()
         self.scale = scale * input_meters_per_unit
+        self.xyz_matrix = np.zeros((3, 3), dtype=float)
+        for robot_axis, source_axis in enumerate(xyz_map):
+            if source_axis != "0":
+                sign = -1 if source_axis.startswith("-") else 1
+                source_index = "xyz".index(source_axis.lstrip("+-"))
+                self.xyz_matrix[robot_axis, source_index] = sign
         self.speed = speed
         self.radius = radius
         self.timeout = timeout
@@ -79,7 +86,8 @@ class CartesianPreview:
             self.last_step = None
             return self.target.copy(), "holding: Quest position jumped"
 
-        desired = self.anchor_target + (sample.pose[:3] - self.anchor) * self.scale
+        displacement = self.xyz_matrix @ (sample.pose[:3] - self.anchor)
+        desired = self.anchor_target + displacement * self.scale
         relative = desired - self.home[:3]
         distance = float(np.linalg.norm(relative))
         clamped = distance > self.radius
@@ -103,6 +111,18 @@ def positive(value):
     return result
 
 
+def xyz_map(value):
+    axes = tuple(axis.strip().lower() for axis in value.split(","))
+    valid = {"x", "+x", "-x", "y", "+y", "-y", "z", "+z", "-z", "0"}
+    if len(axes) != 3 or any(axis not in valid for axis in axes):
+        raise argparse.ArgumentTypeError(
+            "Expected three source axes, e.g. y,-x,z or 0,-x,0")
+    nonzero = [axis.lstrip("+-") for axis in axes if axis != "0"]
+    if len(nonzero) != len(set(nonzero)):
+        raise argparse.ArgumentTypeError("Each Quest source axis may be used at most once")
+    return axes
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--side", choices=("right", "left"), default="right")
@@ -111,6 +131,8 @@ def parse_args():
     parser.add_argument("--scale", type=positive, default=0.2, help="Quest translation to robot translation ratio")
     parser.add_argument("--input-meters-per-unit", type=positive, default=1.0,
                         help="Use 0.001 if the official topic reports millimeters")
+    parser.add_argument("--xyz-map", type=xyz_map, default=("x", "y", "z"),
+                        help="Robot X,Y,Z source axes; 0 disables an axis (e.g. 0,-x,0)")
     parser.add_argument("--speed", type=positive, default=0.02, help="Preview target speed cap in m/s")
     parser.add_argument("--radius", type=positive, default=0.08, help="Preview radius around SDK home in meters")
     parser.add_argument("--timeout", type=positive, default=0.3, help="Maximum Quest message age in seconds")
@@ -131,9 +153,10 @@ def main():
         model = args.model or ("X5_umi" if args.side == "right" else "X5")
         home, gripper_hold = offline_home(model)
         preview = CartesianPreview(home, args.scale, args.input_meters_per_unit,
-                                   args.speed, args.radius, args.timeout)
+                                   args.speed, args.radius, args.timeout, args.xyz_map)
         print(json.dumps({"mode": "target", "model": model, "home_pose": home.tolist(),
-                          "gripper_hold_m": gripper_hold, "can_connected": False}), flush=True)
+                          "gripper_hold_m": gripper_hold, "xyz_map": args.xyz_map,
+                          "can_connected": False}), flush=True)
 
     class QuestNode(Node):
         def __init__(self):

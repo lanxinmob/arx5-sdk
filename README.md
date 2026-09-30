@@ -158,8 +158,11 @@ position jumps.
 It does not open CAN, reset an arm, or send robot commands. Run with
 `--side left` to inspect the left topic. If the official topic reports XYZ in
 millimeters, add `--input-meters-per-unit 0.001` after confirming it from live
-samples. The frame directions, units, gripper range and trigger behavior must
-be checked from live Quest data before enabling any X5 motion. In the observed
+samples. `--xyz-map` lists the Quest source for robot X,Y,Z; for example,
+`--xyz-map 0,-x,0` previews Quest +X as robot -Y while leaving robot X and Z
+fixed. The default `x,y,z` preserves the original preview behavior; it is not
+a calibrated robot frame. Check the frame directions, units, gripper range and
+trigger behavior from live Quest data before enabling any X5 motion. In the observed
 Wi-Fi stream, `time_count` advanced with new poses and stayed fixed while the
 last pose was repeated; gripper values could still change independently. This
 is a pose-freshness check, not yet a verified trigger state. The vendor serial
