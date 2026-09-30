@@ -233,12 +233,15 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
         reset_since = None
         reset_latched = True
         last_report = 0
+        other_side = "left" if side == "right" else "right"
         while not stop.is_set():
             tick = time.monotonic()
             sample = inputs.get(side)
             if start.is_set():
                 if home_request(sample):
-                    if not reset_latched:
+                    if home_request(inputs.get(other_side)):
+                        reset_since = None
+                    elif not reset_latched:
                         if reset_since is None:
                             reset_since = tick
                         elif tick - reset_since >= RESET_HOLD:
