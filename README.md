@@ -193,18 +193,20 @@ Replace the six workspace placeholders with measured base-frame coordinates
 in meters. Both bounds must contain the SDK home pose printed by the target
 preview and cover only a physically clear region. The guarded server checks
 each command against these bounds, a 1 mm per-command position step and a
-2 mm home radius. The bridge also clamps its target to the server's XYZ box.
-Its default two-second command watchdog switches to SDK
-damping if accepted pose commands stop; state queries and rejected commands
-do not extend that deadline. Damping is not power removal or a position hold.
+2 mm home radius. The bridge also uses the server's radius when it is smaller
+than the requested radius and clamps its target to the server's XYZ box. Its
+default two-second command watchdog switches to SDK damping if accepted pose
+commands stop; state queries and rejected commands do not extend that
+deadline. Damping is not power removal or a position hold.
 An SDK failure during reset also disarms the server and requests damping.
 
 In another terminal, with the Quest publisher still running, source ROS and
 start with every translation axis disabled. The bridge waits for three
-advancing nonzero `time_count` values before contacting the guarded server;
-hold the right index trigger and move the tracked controller gently to supply
-fresh poses. The explicit reset flag allows the bridge to command home after
-that gate, then it sends only the held home pose and gripper value:
+advancing nonzero `time_count` values and at least 5 mm of Quest XYZ travel
+within one second before contacting the guarded server. Hold the right index
+trigger and move the tracked controller gently to supply fresh poses. The
+explicit reset flag allows the bridge to command home after that gate, then
+it sends only the held home pose and gripper value:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -225,10 +227,11 @@ scale, speed, radius and interface; it caps this initial stage at 0.01 m/s and
 a 0.02 m home radius. The recommended first trial is only 2 mm because offline
 IK on this `X5_umi` model rejected some -X targets 4 mm from zero-joint home;
 offline IK does not prove physical clearance or tracking. Source jumps over
-0.1 m reanchor the target, stale poses hold the last target, and a measured
-XYZ error over 6 mm stops the bridge. RPY and gripper remain at their reset
-values. A stopped bridge leaves
-the guarded server's watchdog in charge; do not leave a powered arm unattended.
+0.1 m and counter resets clear the startup motion gate; jumps also reanchor
+the target. Stale poses hold the last target, and a measured XYZ error over
+6 mm stops the bridge. RPY and gripper remain at their reset values. A stopped
+bridge leaves the guarded server's watchdog in charge; do not leave a powered
+arm unattended.
 
 ### Quest VR Connection Diagnostics
 

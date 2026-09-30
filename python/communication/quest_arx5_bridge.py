@@ -221,7 +221,7 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
         raise RuntimeError("Guarded server did not settle near a valid home command")
     if np.any(command_pose[:3] < workspace_min) or np.any(command_pose[:3] > workspace_max):
         raise RuntimeError("Guarded server command is outside its workspace")
-    return command_pose, gripper, workspace_min, workspace_max
+    return command_pose, gripper, workspace_min, workspace_max, server_radius
 
 
 def parse_args():
@@ -295,7 +295,7 @@ def main():
             self.sample = None
             self.count = 0
             self.last_print = 0.0
-            self.dynamic_times = deque(maxlen=3)
+            self.dynamic_poses = deque(maxlen=128)
             self.preview = preview
             self.gripper_hold = gripper_hold
             self.robot = None
@@ -310,15 +310,24 @@ def main():
                 self.get_logger().warning(str(error))
                 return
             self.count += 1
-            if (previous is not None and self.sample.counter != 0 and
-                    self.sample.counter != previous.counter):
-                self.dynamic_times.append(self.sample.received)
+            if previous is not None and self.sample.counter < previous.counter:
+                self.dynamic_poses.clear()
+            elif (previous is not None and self.sample.counter != 0 and
+                  self.sample.counter > previous.counter):
+                step = np.linalg.norm(self.sample.pose[:3] - previous.pose[:3])
+                if step * args.input_meters_per_unit > args.input_jump_limit:
+                    self.dynamic_poses.clear()
+                self.dynamic_poses.append((self.sample.received, self.sample.pose[:3].copy()))
 
         def source_ready(self, now):
-            return (self.sample is not None and
-                    now - self.sample.received <= args.timeout and
-                    len(self.dynamic_times) == 3 and
-                    now - self.dynamic_times[0] <= 0.5)
+            if self.sample is None or now - self.sample.received > args.timeout:
+                return False
+            recent = [pose for received, pose in self.dynamic_poses
+                      if now - received <= 1.0]
+            if len(recent) < 3:
+                return False
+            travel = max(float(np.linalg.norm(pose - recent[0])) for pose in recent[1:])
+            return travel * args.input_meters_per_unit >= 0.005
 
         def report(self):
             now = time.monotonic()
@@ -358,7 +367,7 @@ def main():
             elif now - sample.received > args.timeout:
                 output["status"] = "Quest data stale"
             elif args.mode == "control":
-                output["status"] = "waiting for advancing Quest poses"
+                output["status"] = "waiting for moving Quest poses"
             print(json.dumps(output), flush=True)
 
     rclpy.init()
@@ -370,10 +379,10 @@ def main():
             rclpy.spin_once(node, timeout_sec=0.1)
             if args.mode == "control" and robot is None and node.source_ready(time.monotonic()):
                 robot = GuardedCartesianClient(args.server_port)
-                home, gripper_hold, workspace_min, workspace_max = guarded_start(
+                home, gripper_hold, workspace_min, workspace_max, server_radius = guarded_start(
                     robot, model, args.interface, args.radius, args.max_tracking_error)
                 node.preview = CartesianPreview(home, args.scale, args.input_meters_per_unit,
-                                                args.speed, args.radius, args.timeout, args.xyz_map,
+                                                args.speed, server_radius, args.timeout, args.xyz_map,
                                                 args.input_jump_limit, workspace_min,
                                                 workspace_max)
                 node.gripper_hold = gripper_hold
@@ -381,7 +390,7 @@ def main():
                 print(json.dumps({"mode": "control", "model": model,
                                   "interface": args.interface, "home_pose": home.tolist(),
                                   "gripper_hold_m": gripper_hold, "xyz_map": args.xyz_map,
-                                  "speed_m_s": args.speed, "radius_m": args.radius,
+                                  "speed_m_s": args.speed, "radius_m": server_radius,
                                   "workspace_min": workspace_min.tolist(),
                                   "workspace_max": workspace_max.tolist(),
                                   "can_connected": True}), flush=True)
