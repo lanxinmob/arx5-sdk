@@ -188,7 +188,10 @@ Use one `X5_umi / can0` arm first. Confirm the robot's home position and a
 physically clear workspace before enabling it. The Quest topic alone cannot
 establish the arm's clearance or coordinate directions. Stop keyboard teleop,
 recorders and other controllers on `can0`; keep the arm unloaded and a physical
-stop available. `RESET_TO_HOME` moves the arm and opens its gripper.
+stop available. `RESET_TO_HOME` moves the joints to zero, briefly commanding
+joint 3 to 0.03 rad before zero, and opens the gripper. Check clearance for the
+whole arm and gripper throughout that sweep; the Cartesian workspace bounds
+below apply to later pose commands, not to the homing trajectory.
 
 The guarded Cartesian server runs in the `arx5` environment; the ROS bridge
 runs under Jazzy's system Python and needs PyZMQ:
