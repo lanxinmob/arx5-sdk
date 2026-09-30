@@ -182,51 +182,34 @@ The advancing counter is a pose-freshness check, not yet a verified trigger
 state. The vendor serial node does not populate `time_count` or a dedicated
 trigger field.
 
-### Quest Single-Arm XYZ (Steps 7-8)
+### Quest Single-Arm Teleoperation (Steps 7-8)
 
-Use one `X5_umi / can0` arm first. Confirm the robot's home position and a
-physically clear workspace before enabling it. The Quest topic alone cannot
-establish the arm's clearance or coordinate directions. Stop keyboard teleop,
-recorders and other controllers on `can0`; keep the arm unloaded and a physical
-stop available. `RESET_TO_HOME` moves the joints to zero, briefly commanding
-joint 3 to 0.03 rad before zero, and opens the gripper. Check clearance for the
-whole arm and gripper throughout that sweep; the Cartesian workspace bounds
-below apply to later pose commands, not to the homing trajectory.
+On this setup, the right arm is `X5_umi / can0`, and its SDK home XYZ is
+`(0.3202, 0.0010, 0.1565)` m. The commands below give up to 10 cm of
+translation from home, 0.5 rad of wrist rotation, and side-trigger gripper
+control. Use them only with the confirmed clear workspace around this arm;
+the numeric box is in the robot base frame and deliberately allows only 3 mm
+toward -X because offline IK rejected farther -X targets. Keep the arm
+unloaded and a physical stop available. Stop other controllers on `can0`.
+`RESET_TO_HOME` first sweeps the whole arm to zero and opens the gripper;
+the Cartesian box does not constrain that sweep.
 
-The guarded Cartesian server runs in the `arx5` environment; the ROS bridge
-runs under Jazzy's system Python and needs PyZMQ:
+Keep the Quest ROS-TCP publisher from the section above running. In a second
+terminal, start the guarded server. Its Python environment is separate from
+the ROS bridge's. The latter needs Ubuntu's `python3-zmq` and `python3-scipy`
+packages (`sudo apt-get install python3-zmq python3-scipy`):
 
 ```bash
-sudo apt-get install python3-zmq
 conda activate arx5
 cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_server_agent_safe.py X5_umi can0 \
-  --bind 127.0.0.1 --port 8765 --max-position-delta 0.001 \
-  --max-home-translation-radius 0.002 \
-  --workspace-min X_MIN Y_MIN Z_MIN --workspace-max X_MAX Y_MAX Z_MAX
+  --bind 127.0.0.1 --port 8765 --max-position-delta 0.002 \
+  --max-home-translation-radius 0.10 \
+  --workspace-min 0.317 -0.099 0.156 \
+  --workspace-max 0.420 0.101 0.206
 ```
 
-Replace the six workspace placeholders with measured base-frame coordinates
-in meters. Both bounds must contain the SDK home pose printed by the target
-preview and cover only a physically clear region. The guarded server checks
-each command against these bounds, a 1 mm per-command position step and a
-2 mm home radius. The bridge also uses the server's radius when it is smaller
-than the requested radius and clamps its target to the server's XYZ box. Its
-default two-second command watchdog switches to SDK damping if accepted pose
-commands stop; state queries and rejected commands do not extend that
-deadline. Damping is not power removal or a position hold.
-An SDK failure during reset also disarms the server and requests damping.
-The reset wait defaults to two seconds: this `X5_umi` was still over 9 mm from
-home after the former 0.7-second wait, then settled near 4 mm during a live
-hold trial.
-
-In another terminal, with the Quest publisher still running, source ROS and
-start with every translation axis disabled. The bridge waits for three
-advancing nonzero `time_count` values and at least 5 mm of Quest XYZ travel
-within one second before contacting the guarded server. Hold the right index
-trigger and move the tracked controller gently to supply fresh poses. The
-explicit reset flag allows the bridge to command home after that gate, then
-it sends only the held home pose and gripper value:
+In a third terminal, start full right-hand control:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -234,39 +217,32 @@ source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
 cd /home/hjadmin/projects/arx5-sdk
 /usr/bin/python3 python/communication/quest_arx5_bridge.py \
   --mode control --side right --model X5_umi --interface can0 \
-  --reset-to-home --scale 0.01 --xyz-map 0,0,0 \
-  --speed 0.002 --radius 0.002
+  --reset-to-home --wide-range --scale 1.0 --xyz-map x,y,z \
+  --rpy-map r,p,y --gripper-follow --speed 0.02 --radius 0.10
 ```
 
-Only after verifying the Quest and robot directions with live observations,
-stop both processes, restart the guarded server, and replace the axis map with
-one enabled axis, for example `--xyz-map 0,y,0` if robot -Y is verified as
-the intended body-right direction. Repeat for the
-other axes before combining them. Control mode requires explicit mapping,
-scale, speed, radius and interface; it caps this initial stage at 0.01 m/s and
-a 0.02 m home radius. After verifying small motions and a physically clear,
-measured workspace, `--wide-range` permits up to 0.02 m/s and a 0.15 m home
-radius; the guarded server must be restarted with matching workspace bounds,
-home radius and a position step no greater than 0.002 m. This flag does not
-infer clearance or make unreachable poses valid. The recommended first trial
-is only 2 mm because offline IK on this `X5_umi` model rejected some -X
-targets 4 mm from zero-joint home; offline IK does not prove physical clearance
-or tracking. Source jumps over 0.1 m and counter resets clear the startup motion
-gate; jumps also reanchor
-the target. Stale poses hold the last target, and a measured XYZ error over
-6 mm stops the bridge. By default, RPY and gripper remain at their reset values.
-A stopped bridge leaves the guarded server's watchdog in charge; do not leave a
-powered arm unattended.
+The bridge waits for three advancing nonzero `time_count` values and at least
+5 mm of right-controller travel within one second before it resets or commands
+the arm. If it prints `Quest data stale`, wake and reopen X5 MR, unlock with
+right A+B and left X+Y, click both joysticks, then hold the right index trigger
+and move the controller. After changing the headset's direction, hold the right
+Meta button for two seconds to recenter. A rising packet count with a fixed
+`time_count` is still stale. At takeover, the bridge anchors the current hand
+pose to the robot home, so move gently at first and check the XYZ and wrist
+directions. Release the index trigger to hold position. The observed Quest
+rightward motion decreases source Y; `--xyz-map x,y,z` therefore sends it
+toward robot -Y. X/Z and rotation directions still need a live check on this
+physical setup; stop with Ctrl-C if any direction is wrong.
 
-After checking each Quest rotation against the robot frame, use
-`--rpy-map 0,0,y` to map Quest yaw to robot yaw, or enable one other axis at a
-time. Source RPY is interpreted as XYZ Euler angles in radians. The bridge
-applies relative rotation vectors from the first fresh pose, reanchors after
-stale or jumped poses, and limits the target to `--angular-speed` (default
-0.1 rad/s) and `--angular-radius` (default 0.5 rad) around home. Control caps
-are 0.2 rad/s and 1 rad. RPY mode needs SciPy in the ROS Python environment
-(`sudo apt-get install python3-scipy` on Ubuntu). The gripper remains held
-until its raw Quest range and direction have been checked live.
+Quest `gripper=5` maps to fully open and `0` to closed, matching the official
+X5 VR controller's `5 -> -3.4` gripper motor mapping. The side trigger changes
+this value independently of the pose counter. Remove `--gripper-follow` to
+hold the gripper open. The bridge limits translation to 0.02 m/s, rotation to
+0.1 rad/s, and gripper travel to 0.02 m/s; the server also limits each command
+and the XYZ box. Stale poses hold the last target, large Quest jumps reanchor,
+and a measured XYZ tracking error over 6 mm stops the bridge. The guarded
+server switches to SDK damping after two seconds without accepted commands;
+damping is not power removal or a position hold. Stop both programs when done.
 
 ### Quest Dual-Arm Recording (Steps 12-14, Pending)
 
