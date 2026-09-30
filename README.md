@@ -60,34 +60,52 @@ geometry before autonomous manipulation.
 
 ### Quest ROS 2 Bring-up (Steps 3-6)
 
-The official ROS 2 `serial_port_node` publishes `arm_control/msg/PosCmd` on
-`/ARX_VR_R` and `/ARX_VR_L`. It reads an ARX USB receiver whose by-id name
-contains `USB_Single_Serial`; the two ARX USB2CAN adapters are not that receiver.
-It never needs an X5 controller process. Do not run the vendor `ARX_VR.sh`,
-which also opens several topic terminals, or `port.sh`, which changes global
-udev permissions.
-The local `ARX_VR.apk` is the `com.DefaultCompany.X5MRControl` app and also
-contains a Unity ROS-TCP connection setting. That setting alone does not show
-which transport the installed Quest app is using. The serial node cannot
-receive Wi-Fi packets; if no `USB_Single_Serial` receiver is present, use the
-non-motion TCP diagnostic below to identify the live path before proceeding.
+The installed Quest app has been observed sending Unity ROS-TCP
+`arm_control/PosCmd` packets over Wi-Fi to `192.168.31.137:10000`. On this host,
+`quest_ros_tcp.py` publishes them as ROS 2 `/ARX_VR_R` and `/ARX_VR_L`; it never
+opens CAN or starts an X5 controller. The official `serial_port_node` is an
+alternative only when an ARX USB receiver whose by-id name contains
+`USB_Single_Serial` is connected. The two ARX USB2CAN adapters are not that
+receiver. Do not start both publishers at once. Do not run the vendor
+`ARX_VR.sh`, which also opens several topic terminals, or `port.sh`, which
+changes global udev permissions.
 
-On this Jazzy host, build the vendor message and serial packages once:
+On this Jazzy host, build the vendor message package once:
+
+```bash
+cd /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2
+source /opt/ros/jazzy/setup.bash
+env PATH=/usr/bin:/bin /usr/bin/colcon build --packages-select arm_control \
+  --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+source install/setup.bash
+```
+
+For the observed Wi-Fi path, start the local publisher from this repository
+after sourcing the vendor message package. The Quest app must target this
+host's address and TCP port 10000. Run this on a trusted LAN only:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
+cd /home/hjadmin/projects/arx5-sdk
+/usr/bin/python3 python/communication/quest_ros_tcp.py --bind 192.168.31.137
+```
+
+If instead using the official USB receiver, first install its serial
+dependencies and build `serial_port` in the same vendor workspace:
 
 ```bash
 sudo apt-get install ros-jazzy-serial-driver ros-jazzy-asio-cmake-module
-cd /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2
-source /opt/ros/jazzy/setup.bash
 env PATH=/usr/bin:/bin /usr/bin/colcon build --packages-up-to serial_port \
   --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
 ```
 
-Check that the receiver is connected before starting the vendor node: this
-version of its constructor indexes the device list even when it is empty.
-The user running it must have access to the serial device (usually through
-the `dialout` group). On a new host, run
-`sudo usermod -aG dialout "$USER"` once and log out/in before launching the node.
+Check that the USB receiver is connected before starting the vendor node:
+this version of its constructor indexes the device list even when it is
+empty. The user must have access to the serial device, usually through the
+`dialout` group. On a new host, run
+`sudo usermod -aG dialout "$USER"` once and log out/in before launching:
 
 ```bash
 ls /dev/serial/by-id/*USB_Single_Serial*
@@ -95,9 +113,13 @@ ros2 run serial_port serial_port_node
 ```
 
 In a second terminal, source the same `install/setup.bash` and inspect the
-right controller first. Move only the Quest controller; leave CAN controllers
-stopped. Confirm that XYZ, RPY and gripper change independently and note their
-units and ranges before interpreting them as robot commands.
+right controller first. Leave CAN controllers stopped. The vendor Quest guide
+says to unlock the app with right A+B and left X+Y together, then press both
+joystick buttons. Hold the right index trigger while slowly moving that
+controller; test the side trigger separately. Confirm that XYZ, RPY and
+gripper change and determine their units and ranges before interpreting them
+as robot commands. A stream of unchanged values does not verify controller
+tracking or the trigger mapping.
 
 ```bash
 ros2 topic echo /ARX_VR_R --once
@@ -129,19 +151,22 @@ It does not open CAN, reset an arm, or send robot commands. Run with
 `--side left` to inspect the left topic. If the official topic reports XYZ in
 millimeters, add `--input-meters-per-unit 0.001` after confirming it from live
 samples. The frame directions, units, gripper range and trigger behavior must
-be checked from live Quest data before enabling any X5 motion. This version of
-the vendor serial node does not populate `time_count` or a dedicated trigger
-field in either published message, so a constant zero is not a clutch signal.
+be checked from live Quest data before enabling any X5 motion. The observed
+Wi-Fi stream includes `time_count`, but its value stayed constant while the
+app was idle; it has not been validated as a clutch signal. The vendor serial
+node does not populate that field or a dedicated trigger field.
 
 ### Quest VR Connection Diagnostics
 
 The inspected ARX VR APK contains Unity ROS-TCP code, not the ZMQ joint
 protocol. Its serialized `ROSConnection` destination is
-`192.168.31.137:10000`; the PC must be reachable at that address unless the
-APK configuration has been changed. Sharing Wi-Fi alone is insufficient to
-confirm that this connection is active.
+`192.168.31.137:10000`. This Quest was observed connecting from
+`192.168.31.107` and sending both arm topics. Sharing Wi-Fi alone is not a
+substitute for seeing an actual TCP connection and increasing message counts.
 
-From `python/`, run the standard-library-only diagnostic receiver:
+To inspect raw packets instead of publishing ROS topics, stop
+`quest_ros_tcp.py`, then run the standard-library-only diagnostic receiver
+from `python/`:
 
 ```bash
 python communication/vr_receiver.py --protocol ROS2
