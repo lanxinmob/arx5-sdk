@@ -145,7 +145,9 @@ CONDA_PREFIX="$ARX5_ENV" cmake -S . -B build/quest-jazzy \
 CONDA_PREFIX="$ARX5_ENV" LIBRARY_PATH="$ARX5_ENV/lib" \
   cmake --build build/quest-jazzy --target arx5_interface -j 4
 LD_LIBRARY_PATH="$ARX5_ENV/lib:$LD_LIBRARY_PATH" PYTHONPATH="$PWD/python:$PYTHONPATH" \
-  /usr/bin/python3 python/communication/quest_arx5_bridge.py --mode target
+  /usr/bin/python3 python/communication/quest_arx5_bridge.py \
+  --mode target --side right --model X5_umi --scale 0.01 \
+  --xyz-map 0,y,0 --speed 0.002 --radius 0.002
 ```
 
 The preview uses the model's zero-joint FK pose as its starting point, anchors
@@ -239,6 +241,15 @@ the target. Stale poses hold the last target, and a measured XYZ error over
 6 mm stops the bridge. RPY and gripper remain at their reset values. A stopped
 bridge leaves the guarded server's watchdog in charge; do not leave a powered
 arm unattended.
+
+### Quest Dual-Arm Recording (Steps 12-14, Pending)
+
+The existing `examples/record_episodes.py` records one leader/follower pair
+and at most two named camera views; it is not yet a Quest dual-arm recorder.
+Its camera capture and HDF5 writer can be reused after both arms are validated.
+On 2026-09-30, Vin 1 (`/dev/video0`) delivered a live overhead tabletop view,
+while Vin 2/3/4 returned only constant-gray frames despite reporting 60 FPS.
+Both wrist feeds need valid images before three-view collection can be verified.
 
 ### Quest VR Connection Diagnostics
 
