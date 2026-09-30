@@ -47,13 +47,13 @@ class Arx5ControllerBase // parent class for the other two controllers
 
     JointState joint_state_{robot_config_.joint_dof};
     Gain gain_{robot_config_.joint_dof};
-    // bool prev_gripper_updated_ = false; // Declaring here leads to segfault
-
     ArxCan can_handle_;
     std::shared_ptr<spdlog::logger> logger_;
     std::thread background_send_recv_thread_;
 
-    bool prev_gripper_updated_ = false; // To suppress the warning message
+    bool gripper_contact_latched_ = false;
+    double gripper_contact_width_ = 0;
+    int gripper_contact_direction_ = 0;
     std::atomic<bool> background_send_recv_running_{false};
     std::atomic<bool> destroy_background_threads_{false};
     std::atomic<bool> emergency_{false};

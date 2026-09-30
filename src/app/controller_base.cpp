@@ -207,6 +207,7 @@ void Arx5ControllerBase::reset_to_home()
     {
         std::lock_guard<std::mutex> guard(cmd_mutex_);
         require_healthy_();
+        gripper_contact_latched_ = false;
         JointState start_state{robot_config_.joint_dof};
         start_state.pos = init_state.pos;
         start_state.gripper_pos = init_state.gripper_pos;
@@ -245,6 +246,7 @@ void Arx5ControllerBase::set_to_damping()
         if (is_emergency())
             return;
         gain_ = damping_gain;
+        gripper_contact_latched_ = false;
         joint_state.vel = VecDoF::Zero(robot_config_.joint_dof);
         joint_state.torque = VecDoF::Zero(robot_config_.joint_dof);
         joint_state.gripper_vel = 0;
@@ -508,6 +510,8 @@ void Arx5ControllerBase::update_output_cmd_()
     // TODO: deal with non-zero velocity and torque for joint control
     double timestamp = get_timestamp();
     output_joint_cmd_ = interpolator_.interpolate(timestamp);
+    double requested_gripper_pos = std::max(0.0, std::min(
+        robot_config_.gripper_width, output_joint_cmd_.gripper_pos));
     if (controller_config_.gravity_compensation)
     {
         output_joint_cmd_.torque += solver_->inverse_dynamics(joint_state_.pos, VecDoF::Zero(robot_config_.joint_dof),
@@ -591,20 +595,29 @@ void Arx5ControllerBase::update_output_cmd_()
                            robot_config_.gripper_width);
         output_joint_cmd_.gripper_pos = robot_config_.gripper_width;
     }
-    if (std::abs(joint_state_.gripper_torque) > robot_config_.gripper_torque_max / 2)
+    if (gripper_contact_latched_ &&
+        (requested_gripper_pos - gripper_contact_width_) * gripper_contact_direction_ < -0.0005)
     {
-        double sign = joint_state_.gripper_torque > 0 ? 1 : -1; // -1 for closing blocked, 1 for opening blocked
-        double delta_pos =
-            output_joint_cmd_.gripper_pos - prev_output_cmd.gripper_pos; // negative for closing, positive for opening
-        if (delta_pos * sign > 0)
-        {
-            if (prev_gripper_updated_)
-                logger_->warn("Gripper torque is too large, gripper pos cmd is not updated");
-            output_joint_cmd_.gripper_pos = prev_output_cmd.gripper_pos;
-            prev_gripper_updated_ = false;
-        }
-        else
-            prev_gripper_updated_ = true;
+        gripper_contact_latched_ = false;
+        logger_->info("Gripper contact hold released");
+    }
+    if (!gripper_contact_latched_ &&
+        std::abs(joint_state_.gripper_torque) >= robot_config_.gripper_torque_max / 2 &&
+        (requested_gripper_pos - joint_state_.gripper_pos) *
+            joint_state_.gripper_torque * robot_config_.gripper_open_readout > 0)
+    {
+        gripper_contact_latched_ = true;
+        gripper_contact_width_ = joint_state_.gripper_pos;
+        gripper_contact_direction_ = requested_gripper_pos < joint_state_.gripper_pos ? -1 : 1;
+        logger_->info("Gripper contact hold at {:.4f} m, torque {:.3f} Nm",
+                      gripper_contact_width_, joint_state_.gripper_torque);
+    }
+    if (gripper_contact_latched_)
+    {
+        output_joint_cmd_.gripper_pos = std::max(0.0, std::min(
+            robot_config_.gripper_width, gripper_contact_width_ - 0.001 * gripper_contact_direction_));
+        output_joint_cmd_.gripper_vel = 0;
+        output_joint_cmd_.gripper_torque = 0;
     }
 
     // Torque clipping
