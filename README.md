@@ -26,19 +26,35 @@ python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
 
 Open or reconnect the Quest app after the bridge starts. Once both hand
 streams arrive, the bridge moves both arms to SDK home and opens the grippers.
-Keep their full homing paths clear. It then anchors each current hand pose to
-the measured arm pose. Hand movement updates the corresponding arm's
-end-effector target; each side trigger controls its gripper. This is end-effector
-pose mapping, not human shoulder/elbow retargeting. The observed Quest pose
-counter gates arm movement; it has not been verified as a trigger signal.
+Keep their full homing paths clear. The Quest app connects over Wi-Fi as a TCP
+client to the PC at `192.168.31.137:10000` and publishes ROS2 `PosCmd` messages
+for `/ARX_VR_R` and `/ARX_VR_L`. `vr_receiver.py` decodes their ROS-TCP/CDR
+payloads. The bridge anchors each current hand pose to the measured arm
+end-effector pose, maps subsequent hand movement to an end-effector target, and
+uses the SDK `Arx5Solver` to calculate six joint targets by inverse kinematics.
+It sends those targets over localhost ZMQ (`8765` right, `8764` left) to the
+joint servers. Each server uses the SDK and SocketCAN (`can0`/`can1`) to drive
+its motors and returns measured joint feedback for the next bridge update.
+Each side trigger controls its gripper. This is end-effector pose mapping, not
+human shoulder/elbow retargeting. The observed Quest pose counter gates arm
+movement; it has not been verified as a trigger signal.
 
-The bridge runs inverse kinematics with the SDK model, sends valid joint
-targets through localhost ZMQ, and steps them within the SDK joint velocity
-limits. It has no additional workspace-radius or Cartesian speed cap.
-Unreachable poses hold at the IK boundary. If Quest packets stop or a measured
-joint crosses the SDK limit, the bridge exits and requests damping; the joint
-servers also disarm after two seconds without accepted targets. Ctrl+C stops
-each program. Damping does not remove power or prevent collisions.
+The bridge steps valid joint targets within the SDK joint velocity limits. It
+has no additional workspace-radius or Cartesian speed cap. Unreachable poses
+hold at the IK boundary. When the bridge stops, including Ctrl+C, Quest packet
+loss, or a measured joint outside the SDK limit, it asks each healthy armed
+server to move slowly to joint zero in two waypoints, keeping the current
+gripper opening, then requests damping. A server also attempts this return
+after two seconds without accepted targets or when it stops. Return planning
+uses about 0.4 rad/s or less per joint. An SDK emergency, lost feedback, or
+power loss can prevent a controlled return; damping does not remove power or
+prevent collisions.
+
+The installed Quest app did not publish a distinguishable right A or left X
+long-press event in the observed `PosCmd` stream: both mode fields and all
+temporary integer fields stayed zero. Those buttons therefore cannot yet
+request a single-arm reset through this PC bridge. Do not use pose or trigger
+release as a substitute button event.
 
 The locally patched SDK holds a blocked gripper at its measured contact width
 at 0.75 Nm and relieves the command by 1 mm. Open by at least 0.5 mm to release
