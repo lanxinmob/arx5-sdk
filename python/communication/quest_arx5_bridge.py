@@ -1,4 +1,4 @@
-"""Preview Quest targets or send bounded XYZ targets to a guarded ARX5 server."""
+"""Preview Quest targets or send bounded poses to a guarded ARX5 server."""
 
 import argparse
 from collections import deque
@@ -47,7 +47,8 @@ def offline_home(model):
 class CartesianPreview:
     def __init__(self, home_pose, scale, input_meters_per_unit, speed, radius, timeout,
                  xyz_map=("x", "y", "z"), input_jump_limit=0.1,
-                 workspace_min=None, workspace_max=None):
+                 workspace_min=None, workspace_max=None, rpy_map=("0", "0", "0"),
+                 rotation_scale=1.0, angular_speed=0.1, angular_radius=0.5):
         self.home = np.asarray(home_pose, dtype=float).copy()
         if self.home.shape != (6,) or not np.isfinite(self.home).all():
             raise ValueError("Home pose must have six finite values")
@@ -74,18 +75,37 @@ class CartesianPreview:
                 sign = -1 if source_axis.startswith("-") else 1
                 source_index = "xyz".index(source_axis.lstrip("+-"))
                 self.xyz_matrix[robot_axis, source_index] = sign
+        self.rpy_matrix = np.zeros((3, 3), dtype=float)
+        for robot_axis, source_axis in enumerate(rpy_map):
+            if source_axis != "0":
+                sign = -1 if source_axis.startswith("-") else 1
+                source_index = "rpy".index(source_axis.lstrip("+-"))
+                self.rpy_matrix[robot_axis, source_index] = sign
+        self.Rotation = None
+        if np.any(self.rpy_matrix):
+            from scipy.spatial.transform import Rotation
+            self.Rotation = Rotation
+            self.home_rotation = Rotation.from_euler("xyz", self.home[3:])
+        self.rotation_scale = rotation_scale
+        self.angular_speed = angular_speed
+        self.angular_radius = angular_radius
         self.speed = speed
         self.radius = radius
         self.timeout = timeout
         self.anchor = None
         self.anchor_target = None
         self.previous = None
+        self.anchor_rotation = None
+        self.anchor_target_rotation = None
+        self.previous_rotation = None
         self.last_step = None
 
     def step(self, sample, now):
         if sample is None or now - sample.received > self.timeout:
             self.anchor = None
             self.previous = None
+            self.anchor_rotation = None
+            self.previous_rotation = None
             self.last_step = None
             return self.target.copy(), "waiting for fresh Quest data"
 
@@ -93,17 +113,28 @@ class CartesianPreview:
             self.anchor = sample.pose[:3].copy()
             self.anchor_target = self.target[:3].copy()
             self.previous = sample.pose[:3].copy()
+            if self.Rotation is not None:
+                self.anchor_rotation = self.Rotation.from_euler("xyz", sample.pose[3:])
+                self.anchor_target_rotation = self.Rotation.from_euler("xyz", self.target[3:])
+                self.previous_rotation = self.anchor_rotation
             self.last_step = now
             return self.target.copy(), "aligned"
 
         delta_input = sample.pose[:3] - self.previous
         self.previous = sample.pose[:3].copy()
         input_step = float(np.linalg.norm(delta_input))
+        source_rotation = None
+        angular_jump = 0.0
+        if self.Rotation is not None:
+            source_rotation = self.Rotation.from_euler("xyz", sample.pose[3:])
+            angular_jump = (source_rotation * self.previous_rotation.inv()).magnitude()
+            self.previous_rotation = source_rotation
         if (input_step * self.input_meters_per_unit > self.input_jump_limit or
-                input_step * self.scale > 0.03):
+                input_step * self.scale > 0.03 or angular_jump > 0.5):
             self.anchor = None
+            self.anchor_rotation = None
             self.last_step = None
-            return self.target.copy(), "holding: Quest position jumped"
+            return self.target.copy(), "holding: Quest pose jumped"
 
         displacement = self.xyz_matrix @ (sample.pose[:3] - self.anchor)
         desired = self.anchor_target + displacement * self.scale
@@ -124,6 +155,23 @@ class CartesianPreview:
         if travel > self.speed * dt and travel > 0:
             delta *= self.speed * dt / travel
         self.target[:3] += delta
+        if self.Rotation is not None:
+            source_delta = (source_rotation * self.anchor_rotation.inv()).as_rotvec()
+            mapped = self.rpy_matrix @ source_delta * self.rotation_scale
+            desired_rotation = self.Rotation.from_rotvec(mapped) * self.anchor_target_rotation
+            home_delta = (desired_rotation * self.home_rotation.inv()).as_rotvec()
+            angle = float(np.linalg.norm(home_delta))
+            if angle > self.angular_radius:
+                desired_rotation = (self.Rotation.from_rotvec(
+                    home_delta * self.angular_radius / angle) * self.home_rotation)
+                clamped = True
+            current_rotation = self.Rotation.from_euler("xyz", self.target[3:])
+            angular_step = (desired_rotation * current_rotation.inv()).as_rotvec()
+            step_angle = float(np.linalg.norm(angular_step))
+            if step_angle > self.angular_speed * dt and step_angle > 0:
+                angular_step *= self.angular_speed * dt / step_angle
+            self.target[3:] = (self.Rotation.from_rotvec(angular_step) *
+                               current_rotation).as_euler("xyz")
         return self.target.copy(), "workspace clamped" if clamped else "tracking"
 
 
@@ -143,6 +191,18 @@ def xyz_map(value):
     nonzero = [axis.lstrip("+-") for axis in axes if axis != "0"]
     if len(nonzero) != len(set(nonzero)):
         raise argparse.ArgumentTypeError("Each Quest source axis may be used at most once")
+    return axes
+
+
+def rpy_map(value):
+    axes = tuple(axis.strip().lower() for axis in value.split(","))
+    valid = {"r", "+r", "-r", "p", "+p", "-p", "y", "+y", "-y", "0"}
+    if len(axes) != 3 or any(axis not in valid for axis in axes):
+        raise argparse.ArgumentTypeError(
+            "Expected three source axes, e.g. r,-p,y or 0,0,0")
+    nonzero = [axis.lstrip("+-") for axis in axes if axis != "0"]
+    if len(nonzero) != len(set(nonzero)):
+        raise argparse.ArgumentTypeError("Each Quest RPY axis may be used at most once")
     return axes
 
 
@@ -238,6 +298,13 @@ def parse_args():
                         help="Use 0.001 if the official topic reports millimeters")
     parser.add_argument("--xyz-map", type=xyz_map,
                         help="Robot X,Y,Z source axes; 0 disables an axis (e.g. 0,-x,0)")
+    parser.add_argument("--rpy-map", type=rpy_map, default=("0", "0", "0"),
+                        help="Robot roll,pitch,yaw source axes; 0 disables an axis")
+    parser.add_argument("--rotation-scale", type=positive, default=1.0)
+    parser.add_argument("--angular-speed", type=positive, default=0.1,
+                        help="Target angular speed cap in rad/s")
+    parser.add_argument("--angular-radius", type=positive, default=0.5,
+                        help="Target rotation cap around SDK home in radians")
     parser.add_argument("--speed", type=positive, help="Target speed cap in m/s")
     parser.add_argument("--radius", type=positive, help="Target radius around SDK home in meters")
     parser.add_argument("--wide-range", action="store_true",
@@ -263,6 +330,8 @@ def parse_args():
                 f"Control is limited to {speed_limit:.2f} m/s and a "
                 f"{radius_limit:.2f} m home radius"
             )
+        if args.angular_speed > 0.2 or args.angular_radius > 1.0:
+            parser.error("Control RPY is limited to 0.2 rad/s and 1.0 rad from home")
     elif args.reset_to_home:
         parser.error("--reset-to-home is only valid with --mode control")
     if args.scale is None:
@@ -290,9 +359,13 @@ def main():
         home, gripper_hold = offline_home(model)
         preview = CartesianPreview(home, args.scale, args.input_meters_per_unit,
                                    args.speed, args.radius, args.timeout, args.xyz_map,
-                                   args.input_jump_limit)
+                                   args.input_jump_limit, rpy_map=args.rpy_map,
+                                   rotation_scale=args.rotation_scale,
+                                   angular_speed=args.angular_speed,
+                                   angular_radius=args.angular_radius)
         print(json.dumps({"mode": "target", "model": model, "home_pose": home.tolist(),
                           "gripper_hold_m": gripper_hold, "xyz_map": args.xyz_map,
+                          "rpy_map": args.rpy_map,
                           "can_connected": False}), flush=True)
 
     class QuestNode(Node):
@@ -390,12 +463,15 @@ def main():
                 node.preview = CartesianPreview(home, args.scale, args.input_meters_per_unit,
                                                 args.speed, server_radius, args.timeout, args.xyz_map,
                                                 args.input_jump_limit, workspace_min,
-                                                workspace_max)
+                                                workspace_max, args.rpy_map,
+                                                args.rotation_scale, args.angular_speed,
+                                                args.angular_radius)
                 node.gripper_hold = gripper_hold
                 node.robot = robot
                 print(json.dumps({"mode": "control", "model": model,
                                   "interface": args.interface, "home_pose": home.tolist(),
                                   "gripper_hold_m": gripper_hold, "xyz_map": args.xyz_map,
+                                  "rpy_map": args.rpy_map,
                                   "speed_m_s": args.speed, "radius_m": server_radius,
                                   "workspace_min": workspace_min.tolist(),
                                   "workspace_max": workspace_max.tolist(),

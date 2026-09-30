@@ -250,13 +250,23 @@ radius; the guarded server must be restarted with matching workspace bounds,
 home radius and a position step no greater than 0.002 m. This flag does not
 infer clearance or make unreachable poses valid. The recommended first trial
 is only 2 mm because offline IK on this `X5_umi` model rejected some -X
-targets 4 mm from zero-joint home;
-offline IK does not prove physical clearance or tracking. Source jumps over
-0.1 m and counter resets clear the startup motion gate; jumps also reanchor
+targets 4 mm from zero-joint home; offline IK does not prove physical clearance
+or tracking. Source jumps over 0.1 m and counter resets clear the startup motion
+gate; jumps also reanchor
 the target. Stale poses hold the last target, and a measured XYZ error over
-6 mm stops the bridge. RPY and gripper remain at their reset values. A stopped
-bridge leaves the guarded server's watchdog in charge; do not leave a powered
-arm unattended.
+6 mm stops the bridge. By default, RPY and gripper remain at their reset values.
+A stopped bridge leaves the guarded server's watchdog in charge; do not leave a
+powered arm unattended.
+
+After checking each Quest rotation against the robot frame, use
+`--rpy-map 0,0,y` to map Quest yaw to robot yaw, or enable one other axis at a
+time. Source RPY is interpreted as XYZ Euler angles in radians. The bridge
+applies relative rotation vectors from the first fresh pose, reanchors after
+stale or jumped poses, and limits the target to `--angular-speed` (default
+0.1 rad/s) and `--angular-radius` (default 0.5 rad) around home. Control caps
+are 0.2 rad/s and 1 rad. RPY mode needs SciPy in the ROS Python environment
+(`sudo apt-get install python3-scipy` on Ubuntu). The gripper remains held
+until its raw Quest range and direction have been checked live.
 
 ### Quest Dual-Arm Recording (Steps 12-14, Pending)
 
