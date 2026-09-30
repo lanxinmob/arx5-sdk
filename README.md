@@ -168,6 +168,62 @@ last pose was repeated; gripper values could still change independently. This
 is a pose-freshness check, not yet a verified trigger state. The vendor serial
 node does not populate `time_count` or a dedicated trigger field.
 
+### Quest Single-Arm XYZ (Steps 7-8)
+
+Use one `X5_umi / can0` arm first. Confirm the robot's home position and a
+physically clear workspace before enabling it. The Quest topic alone cannot
+establish the arm's clearance or coordinate directions. Stop keyboard teleop,
+recorders and other controllers on `can0`; keep the arm unloaded and a physical
+stop available. `RESET_TO_HOME` moves the arm and opens its gripper.
+
+The guarded Cartesian server runs in the `arx5` environment; the ROS bridge
+runs under Jazzy's system Python and needs PyZMQ:
+
+```bash
+sudo apt-get install python3-zmq
+conda activate arx5
+cd /home/hjadmin/projects/arx5-sdk/python
+python communication/zmq_server_agent_safe.py X5_umi can0 \
+  --bind 127.0.0.1 --port 8765 --max-position-delta 0.001 \
+  --max-home-translation-radius 0.01 \
+  --workspace-min X_MIN Y_MIN Z_MIN --workspace-max X_MAX Y_MAX Z_MAX
+```
+
+Replace the six workspace placeholders with measured base-frame coordinates
+in meters. Both bounds must contain the SDK home pose printed by the target
+preview and cover only a physically clear region. The guarded server checks
+each command against these bounds, a 1 mm per-command position step and a
+10 mm home radius. Its default two-second command watchdog switches to SDK
+damping if the bridge stops; damping is not power removal or a position hold.
+
+In another terminal, with the Quest publisher still running, source ROS and
+start with every translation axis disabled. The bridge waits for three
+advancing nonzero `time_count` values before contacting the guarded server;
+hold the right index trigger and move the tracked controller gently to supply
+fresh poses. The explicit reset flag allows the bridge to command home after
+that gate, then it sends only the held home pose and gripper value:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
+cd /home/hjadmin/projects/arx5-sdk
+/usr/bin/python3 python/communication/quest_arx5_bridge.py \
+  --mode control --side right --model X5_umi --interface can0 \
+  --reset-to-home --scale 0.05 --xyz-map 0,0,0 \
+  --speed 0.005 --radius 0.01
+```
+
+Only after verifying the Quest and robot directions with live observations,
+stop both processes, restart the guarded server, and replace the axis map with
+one enabled axis, for example `--xyz-map 0,-x,0` if Quest +X is verified as
+body-right and robot -Y is the intended sideways direction. Repeat for the
+other axes before combining them. Control mode requires explicit mapping,
+scale, speed, radius and interface; it caps this initial stage at 0.01 m/s and
+a 0.02 m home radius. Source jumps over 0.1 m reanchor the target, stale
+poses hold the last target, and a measured XYZ error over 6 mm stops the
+bridge. RPY and gripper remain at their reset values. A stopped bridge leaves
+the guarded server's watchdog in charge; do not leave a powered arm unattended.
+
 ### Quest VR Connection Diagnostics
 
 The inspected ARX VR APK contains Unity ROS-TCP code, not the ZMQ joint
