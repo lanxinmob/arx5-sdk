@@ -46,10 +46,24 @@ def offline_home(model):
 
 class CartesianPreview:
     def __init__(self, home_pose, scale, input_meters_per_unit, speed, radius, timeout,
-                 xyz_map=("x", "y", "z"), input_jump_limit=0.1):
+                 xyz_map=("x", "y", "z"), input_jump_limit=0.1,
+                 workspace_min=None, workspace_max=None):
         self.home = np.asarray(home_pose, dtype=float).copy()
         if self.home.shape != (6,) or not np.isfinite(self.home).all():
             raise ValueError("Home pose must have six finite values")
+        if (workspace_min is None) != (workspace_max is None):
+            raise ValueError("Workspace min and max must be provided together")
+        self.workspace_min = None
+        self.workspace_max = None
+        if workspace_min is not None:
+            self.workspace_min = np.asarray(workspace_min, dtype=float).copy()
+            self.workspace_max = np.asarray(workspace_max, dtype=float).copy()
+            if (self.workspace_min.shape != (3,) or self.workspace_max.shape != (3,) or
+                    not np.isfinite(self.workspace_min).all() or
+                    not np.isfinite(self.workspace_max).all() or
+                    np.any(self.workspace_min > self.home[:3]) or
+                    np.any(self.workspace_max < self.home[:3])):
+                raise ValueError("Workspace bounds must contain the finite home XYZ")
         self.target = self.home.copy()
         self.scale = scale * input_meters_per_unit
         self.input_meters_per_unit = input_meters_per_unit
@@ -98,6 +112,10 @@ class CartesianPreview:
         clamped = distance > self.radius
         if clamped:
             desired = self.home[:3] + relative * self.radius / distance
+        if self.workspace_min is not None:
+            bounded = np.clip(desired, self.workspace_min, self.workspace_max)
+            clamped = clamped or not np.array_equal(bounded, desired)
+            desired = bounded
 
         dt = min(max(now - self.last_step, 0.0), 0.1)
         self.last_step = now
@@ -201,7 +219,9 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
             np.linalg.norm(command_pose[:3] - home[:3]) > 0.0001 or
             np.linalg.norm(measured_pose[:3] - command_pose[:3]) > max_tracking_error):
         raise RuntimeError("Guarded server did not settle near a valid home command")
-    return command_pose, gripper
+    if np.any(command_pose[:3] < workspace_min) or np.any(command_pose[:3] > workspace_max):
+        raise RuntimeError("Guarded server command is outside its workspace")
+    return command_pose, gripper, workspace_min, workspace_max
 
 
 def parse_args():
@@ -350,17 +370,20 @@ def main():
             rclpy.spin_once(node, timeout_sec=0.1)
             if args.mode == "control" and robot is None and node.source_ready(time.monotonic()):
                 robot = GuardedCartesianClient(args.server_port)
-                home, gripper_hold = guarded_start(
+                home, gripper_hold, workspace_min, workspace_max = guarded_start(
                     robot, model, args.interface, args.radius, args.max_tracking_error)
                 node.preview = CartesianPreview(home, args.scale, args.input_meters_per_unit,
                                                 args.speed, args.radius, args.timeout, args.xyz_map,
-                                                args.input_jump_limit)
+                                                args.input_jump_limit, workspace_min,
+                                                workspace_max)
                 node.gripper_hold = gripper_hold
                 node.robot = robot
                 print(json.dumps({"mode": "control", "model": model,
                                   "interface": args.interface, "home_pose": home.tolist(),
                                   "gripper_hold_m": gripper_hold, "xyz_map": args.xyz_map,
                                   "speed_m_s": args.speed, "radius_m": args.radius,
+                                  "workspace_min": workspace_min.tolist(),
+                                  "workspace_max": workspace_max.tolist(),
                                   "can_connected": True}), flush=True)
     except KeyboardInterrupt:
         pass

@@ -185,7 +185,7 @@ conda activate arx5
 cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_server_agent_safe.py X5_umi can0 \
   --bind 127.0.0.1 --port 8765 --max-position-delta 0.001 \
-  --max-home-translation-radius 0.01 \
+  --max-home-translation-radius 0.002 \
   --workspace-min X_MIN Y_MIN Z_MIN --workspace-max X_MAX Y_MAX Z_MAX
 ```
 
@@ -193,7 +193,8 @@ Replace the six workspace placeholders with measured base-frame coordinates
 in meters. Both bounds must contain the SDK home pose printed by the target
 preview and cover only a physically clear region. The guarded server checks
 each command against these bounds, a 1 mm per-command position step and a
-10 mm home radius. Its default two-second command watchdog switches to SDK
+2 mm home radius. The bridge also clamps its target to the server's XYZ box.
+Its default two-second command watchdog switches to SDK
 damping if accepted pose commands stop; state queries and rejected commands
 do not extend that deadline. Damping is not power removal or a position hold.
 An SDK failure during reset also disarms the server and requests damping.
@@ -211,8 +212,8 @@ source /home/hjadmin/projects/ARX_X5/ARX_VR_SDK/ROS2/install/setup.bash
 cd /home/hjadmin/projects/arx5-sdk
 /usr/bin/python3 python/communication/quest_arx5_bridge.py \
   --mode control --side right --model X5_umi --interface can0 \
-  --reset-to-home --scale 0.05 --xyz-map 0,0,0 \
-  --speed 0.005 --radius 0.01
+  --reset-to-home --scale 0.02 --xyz-map 0,0,0 \
+  --speed 0.002 --radius 0.002
 ```
 
 Only after verifying the Quest and robot directions with live observations,
@@ -221,9 +222,12 @@ one enabled axis, for example `--xyz-map 0,-x,0` if Quest +X is verified as
 body-right and robot -Y is the intended sideways direction. Repeat for the
 other axes before combining them. Control mode requires explicit mapping,
 scale, speed, radius and interface; it caps this initial stage at 0.01 m/s and
-a 0.02 m home radius. Source jumps over 0.1 m reanchor the target, stale
-poses hold the last target, and a measured XYZ error over 6 mm stops the
-bridge. RPY and gripper remain at their reset values. A stopped bridge leaves
+a 0.02 m home radius. The recommended first trial is only 2 mm because offline
+IK on this `X5_umi` model rejected some -X targets 4 mm from zero-joint home;
+offline IK does not prove physical clearance or tracking. Source jumps over
+0.1 m reanchor the target, stale poses hold the last target, and a measured
+XYZ error over 6 mm stops the bridge. RPY and gripper remain at their reset
+values. A stopped bridge leaves
 the guarded server's watchdog in charge; do not leave a powered arm unattended.
 
 ### Quest VR Connection Diagnostics
