@@ -188,7 +188,10 @@ class Arx5AgentSafeServer:
                     "data": {
                         "name": "arx5_agent_safe",
                         "protocol_version": 1,
+                        "model": self.model,
+                        "interface": self.interface,
                         "armed": self.guard.armed,
+                        "home_pose": self.guard.home_pose,
                         "limits": {
                             "max_position_delta": self.guard.max_position_delta,
                             "max_rpy_delta": self.guard.max_rpy_delta,
@@ -197,6 +200,14 @@ class Arx5AgentSafeServer:
                             "max_gripper_delta": self.guard.max_gripper_delta,
                             "max_home_translation_radius": (
                                 self.guard.max_home_translation_radius
+                            ),
+                            "workspace_min": (
+                                None if self.guard.workspace_min is None
+                                else self.guard.workspace_min.copy()
+                            ),
+                            "workspace_max": (
+                                None if self.guard.workspace_max is None
+                                else self.guard.workspace_max.copy()
                             ),
                         },
                     },
