@@ -37,16 +37,18 @@ joint servers. Each server uses the SDK and SocketCAN (`can0`/`can1`) to drive
 its motors and returns measured joint feedback for the next bridge update.
 Each side trigger controls its gripper. Long-press right A or left X to return
 that arm slowly to joint zero while holding its current gripper opening. Once
-the button is released, the bridge realigns that hand to the measured arm pose.
+fresh hand tracking resumes, the bridge realigns that hand to the measured arm
+pose and continues teleoperation. If tracking pauses during the button reset,
+the bridge stays running and holds that arm at home until tracking resumes.
 This is end-effector pose mapping, not human shoulder/elbow retargeting. The
 observed Quest pose counter gates arm movement; it is not a trigger signal.
 
 The bridge steps valid joint targets within the SDK joint velocity limits. It
 has no additional workspace-radius or Cartesian speed cap. Unreachable poses
 hold at the IK boundary. When the bridge stops, including Ctrl+C, Quest packet
-loss, or a measured joint outside the SDK limit, it asks each healthy armed
-server to move slowly to joint zero in two waypoints, keeping the current
-gripper opening, then requests damping. A server also attempts this return
+loss outside a button reset, or a measured joint outside the SDK limit, it asks
+each healthy armed server to move slowly to joint zero in two waypoints, keeping
+the current gripper opening, then requests damping. A server also attempts this return
 after two seconds without accepted targets or when it stops. Return planning
 uses about 0.4 rad/s or less per joint. An SDK emergency, lost feedback, or
 power loss can prevent a controlled return; damping does not remove power or
@@ -58,7 +60,7 @@ bridge interprets one second of this pattern as a reset request, so those
 packets do not close the gripper. Side-trigger packets with changing gripper
 values keep normal gripper control. If both sides show the pattern together,
 the bridge holds position instead of treating either as a single-arm reset.
-This mapping has been checked with a fake joint server, not on powered arms.
+The button reset has been confirmed on powered arms.
 If the Quest app changes the packet pattern, the button reset will no longer
 be recognized.
 

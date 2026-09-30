@@ -232,28 +232,40 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
         planner = None
         reset_since = None
         reset_latched = True
+        recovering = False
         last_report = 0
         other_side = "left" if side == "right" else "right"
         while not stop.is_set():
             tick = time.monotonic()
-            sample = inputs.get(side)
+            try:
+                sample = inputs.get(side)
+            except ValueError:
+                if not recovering:
+                    raise
+                sample = None
             if start.is_set():
-                if home_request(sample):
-                    if home_request(inputs.get(other_side)):
-                        reset_since = None
-                    elif not reset_latched:
-                        if reset_since is None:
-                            reset_since = tick
-                        elif tick - reset_since >= RESET_HOLD:
-                            reset_latched = True
+                if sample is None or home_request(sample):
+                    if sample is not None and not recovering:
+                        if home_request(inputs.get(other_side)):
                             reset_since = None
-                            print(f"{side}: Quest long press, slow return to home", flush=True)
-                            client.request("RETURN_TO_HOME", timeout=35000)
-                            state = client.request("GET_STATE")
-                            planner = None
+                        elif not reset_latched:
+                            if reset_since is None:
+                                reset_since = tick
+                            elif tick - reset_since >= RESET_HOLD:
+                                reset_latched = True
+                                reset_since = None
+                                recovering = True
+                                print(f"{side}: Quest long press, slow return to home", flush=True)
+                                client.request("RETURN_TO_HOME", timeout=35000)
+                                state = client.request("GET_STATE")
+                                planner = None
+                                print(f"{side}: home complete; waiting for hand tracking", flush=True)
                     q = vector(state["joint_pos"], robot.joint_dof)
                     gripper = float(np.clip(state["gripper_pos"], 0, robot.gripper_width))
                 else:
+                    if recovering:
+                        recovering = False
+                        print(f"{side}: hand tracking resumed", flush=True)
                     reset_since = None
                     reset_latched = False
                     if planner is None:
@@ -265,7 +277,7 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
                 gripper = float(np.clip(state["gripper_pos"], 0, robot.gripper_width))
             if stop.is_set():
                 break
-            if time.monotonic() - sample.received > args.input_timeout:
+            if not recovering and time.monotonic() - sample.received > args.input_timeout:
                 raise ValueError(f"{side}: Quest packet expired during planning")
             state = client.request("SET_JOINT_POS", {"joint_pos": q, "gripper_pos": gripper})
             if planner is not None and tick - last_report >= 1:
@@ -411,8 +423,6 @@ def main():
                 workers.append(worker)
                 worker.start()
             while not stop.wait(0.02):
-                for side in ("right", "left"):
-                    inputs.get(side)
                 if all(event.is_set() for event in ready):
                     start.set()
         except Exception as error:
