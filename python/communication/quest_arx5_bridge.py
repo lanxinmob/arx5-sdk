@@ -19,12 +19,16 @@ class QuestSample:
     received: float
 
 
-def sample_from_msg(msg, now):
+def sample_from_msg(msg, now, previous=None):
     pose = np.array([msg.x, msg.y, msg.z, msg.roll, msg.pitch, msg.yaw], dtype=float)
     gripper = float(msg.gripper)
     if not np.isfinite(pose).all() or not math.isfinite(gripper):
         raise ValueError("Quest pose or gripper contains a nonfinite value")
-    return QuestSample(pose, gripper, msg.mode1, msg.mode2, msg.time_count, now)
+    received = now
+    if previous is not None and msg.time_count != 0 and msg.time_count == previous.counter:
+        # The Wi-Fi app can repeat its last pose while this counter is frozen.
+        received = previous.received
+    return QuestSample(pose, gripper, msg.mode1, msg.mode2, msg.time_count, received)
 
 
 def offline_home(model):
@@ -142,7 +146,7 @@ def main():
 
         def on_message(self, msg):
             try:
-                self.sample = sample_from_msg(msg, time.monotonic())
+                self.sample = sample_from_msg(msg, time.monotonic(), self.sample)
             except ValueError as error:
                 self.get_logger().warning(str(error))
                 return
