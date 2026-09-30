@@ -145,13 +145,23 @@ class Arx5AgentSafeServer:
 
     def _handle_reset_to_home(self) -> None:
         self.guard.disarm()
-        self.controller.reset_to_home()
-        if self.reset_settle_time:
-            time.sleep(self.reset_settle_time)
-        reset_cmd = self.controller.get_eef_cmd()
-        self.guard.arm(reset_cmd.pose_6d().copy(), reset_cmd.gripper_pos)
-        self.last_command_time = time.monotonic()
-        self.socket.send_pyobj({"cmd": "RESET_TO_HOME", "data": "OK"})
+        try:
+            self.controller.reset_to_home()
+            if self.reset_settle_time:
+                time.sleep(self.reset_settle_time)
+            if self.controller.is_emergency():
+                raise RuntimeError("SDK emergency during reset")
+            reset_cmd = self.controller.get_eef_cmd()
+            self.guard.arm(reset_cmd.pose_6d().copy(), reset_cmd.gripper_pos)
+            self.last_command_time = time.monotonic()
+            self.socket.send_pyobj({"cmd": "RESET_TO_HOME", "data": "OK"})
+        except Exception:
+            self.guard.disarm()
+            try:
+                self.controller.set_to_damping()
+            except Exception:
+                print(_exception_text())
+            raise
 
     def _validate_gain_vector(self, value: Any, name: str) -> np.ndarray:
         array = np.asarray(value, dtype=np.float64)

@@ -196,6 +196,7 @@ each command against these bounds, a 1 mm per-command position step and a
 10 mm home radius. Its default two-second command watchdog switches to SDK
 damping if accepted pose commands stop; state queries and rejected commands
 do not extend that deadline. Damping is not power removal or a position hold.
+An SDK failure during reset also disarms the server and requests damping.
 
 In another terminal, with the Quest publisher still running, source ROS and
 start with every translation axis disabled. The bridge waits for three
