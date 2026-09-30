@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 DT = 0.02
 POSE_FIELDS = ("x", "y", "z", "roll", "pitch", "yaw")
+RESET_COUNTER = 1107
+RESET_HOLD = 1.0
 
 
 def vector(value, size):
@@ -93,6 +95,12 @@ class Sample:
     changed: float
     generation: int
     epoch: int
+
+
+def home_request(sample):
+    # Observed during the A/X trial; the Quest app does not document this pattern.
+    return (sample.counter == RESET_COUNTER and sample.gripper < 0.01
+            and np.max(np.abs(sample.pose[3:])) < 0.05)
 
 
 class Inputs:
@@ -222,15 +230,33 @@ def arm_worker(side, robot, solver, args, inputs, stop, start, ready, failed):
         state = client.request("GET_STATE")
         ready.set()
         planner = None
+        reset_since = None
+        reset_latched = True
         last_report = 0
         while not stop.is_set():
             tick = time.monotonic()
             sample = inputs.get(side)
             if start.is_set():
-                if planner is None:
-                    planner = Planner(robot, solver, state, sample,
-                                      getattr(args, side + "_frame_rpy"), args)
-                q, gripper = planner.step(sample, state)
+                if home_request(sample):
+                    if not reset_latched:
+                        if reset_since is None:
+                            reset_since = tick
+                        elif tick - reset_since >= RESET_HOLD:
+                            reset_latched = True
+                            reset_since = None
+                            print(f"{side}: Quest long press, slow return to home", flush=True)
+                            client.request("RETURN_TO_HOME", timeout=35000)
+                            state = client.request("GET_STATE")
+                            planner = None
+                    q = vector(state["joint_pos"], robot.joint_dof)
+                    gripper = float(np.clip(state["gripper_pos"], 0, robot.gripper_width))
+                else:
+                    reset_since = None
+                    reset_latched = False
+                    if planner is None:
+                        planner = Planner(robot, solver, state, sample,
+                                          getattr(args, side + "_frame_rpy"), args)
+                    q, gripper = planner.step(sample, state)
             else:
                 q = vector(state["joint_pos"], robot.joint_dof)
                 gripper = float(np.clip(state["gripper_pos"], 0, robot.gripper_width))
