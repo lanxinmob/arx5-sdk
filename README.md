@@ -91,6 +91,11 @@ cd /home/hjadmin/projects/arx5-sdk
 /usr/bin/python3 python/communication/quest_ros_tcp.py --bind 192.168.31.137
 ```
 
+The publisher closes a TCP session after five seconds without incoming bytes
+and keeps listening for a new connection. If Quest sleeps, wake the headset
+and return to the app; a connected socket or increasing packet counts alone
+do not prove that controller poses are updating.
+
 If instead using the official USB receiver, first install its serial
 dependencies and build `serial_port` in the same vendor workspace:
 
