@@ -185,11 +185,13 @@ trigger field.
 ### Quest Single-Arm Teleoperation (Steps 7-8)
 
 On this setup, the right arm is `X5_umi / can0`, and its SDK home XYZ is
-`(0.3202, 0.0010, 0.1565)` m. The commands below give up to 10 cm of
-translation from home, 0.5 rad of wrist rotation, and side-trigger gripper
-control. Use them only with the confirmed clear workspace around this arm;
-the numeric box is in the robot base frame and deliberately allows only 3 mm
-toward -X because offline IK rejected farther -X targets. Keep the arm
+`(0.3202, 0.0010, 0.1565)` m. The commands below allow targets up to 50 cm
+from home, 0.5 rad of wrist rotation, and side-trigger gripper control. Use
+the 50 cm setting only after checking clearance for the entire arm sweep.
+The numeric box is in the robot base frame; it excludes movement below home
+and allows only 3 mm toward -X because offline IK rejected farther -X targets.
+The 50 cm radius is a command limit, not a guarantee that every pose is
+reachable. Keep the arm
 unloaded and a physical stop available. Stop other controllers on `can0`.
 `RESET_TO_HOME` first sweeps the whole arm to zero and opens the gripper;
 the Cartesian box does not constrain that sweep.
@@ -204,9 +206,9 @@ conda activate arx5
 cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_server_agent_safe.py X5_umi can0 \
   --bind 127.0.0.1 --port 8765 --max-position-delta 0.002 \
-  --max-home-translation-radius 0.10 \
-  --workspace-min 0.317 -0.099 0.156 \
-  --workspace-max 0.420 0.101 0.206
+  --max-home-translation-radius 0.50 \
+  --workspace-min 0.317 -0.499 0.156 \
+  --workspace-max 0.820 0.501 0.657
 ```
 
 In a third terminal, start full right-hand control:
@@ -218,7 +220,7 @@ cd /home/hjadmin/projects/arx5-sdk
 /usr/bin/python3 python/communication/quest_arx5_bridge.py \
   --mode control --side right --model X5_umi --interface can0 \
   --reset-to-home --wide-range --scale 1.0 --xyz-map x,y,z \
-  --rpy-map r,p,y --gripper-follow --speed 0.02 --radius 0.10
+  --rpy-map r,p,y --gripper-follow --speed 0.02 --radius 0.50
 ```
 
 The bridge waits for three advancing nonzero `time_count` values and at least
