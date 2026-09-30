@@ -35,9 +35,11 @@ uses the SDK `Arx5Solver` to calculate six joint targets by inverse kinematics.
 It sends those targets over localhost ZMQ (`8765` right, `8764` left) to the
 joint servers. Each server uses the SDK and SocketCAN (`can0`/`can1`) to drive
 its motors and returns measured joint feedback for the next bridge update.
-Each side trigger controls its gripper. This is end-effector pose mapping, not
-human shoulder/elbow retargeting. The observed Quest pose counter gates arm
-movement; it has not been verified as a trigger signal.
+Each side trigger controls its gripper. Long-press right A or left X to return
+that arm slowly to joint zero while holding its current gripper opening. Once
+the button is released, the bridge realigns that hand to the measured arm pose.
+This is end-effector pose mapping, not human shoulder/elbow retargeting. The
+observed Quest pose counter gates arm movement; it is not a trigger signal.
 
 The bridge steps valid joint targets within the SDK joint velocity limits. It
 has no additional workspace-radius or Cartesian speed cap. Unreachable poses
@@ -50,11 +52,13 @@ uses about 0.4 rad/s or less per joint. An SDK emergency, lost feedback, or
 power loss can prevent a controlled return; damping does not remove power or
 prevent collisions.
 
-The installed Quest app did not publish a distinguishable right A or left X
-long-press event in the observed `PosCmd` stream: both mode fields and all
-temporary integer fields stayed zero. Those buttons therefore cannot yet
-request a single-arm reset through this PC bridge. Do not use pose or trigger
-release as a substitute button event.
+During the A/X button trial, the installed Quest app produced an undocumented
+`PosCmd` pattern: `time_count=1107`, `gripper=0`, and near-zero rotation. The
+bridge interprets one second of this pattern as a reset request, so those
+packets do not close the gripper. Side-trigger packets with changing gripper
+values keep normal gripper control. This mapping has been checked with a fake
+joint server, not on powered arms. If the Quest app changes the packet pattern,
+the button reset will no longer be recognized.
 
 The locally patched SDK holds a blocked gripper at its measured contact width
 at 0.75 Nm and relieves the command by 1 mm. Open by at least 0.5 mm to release
