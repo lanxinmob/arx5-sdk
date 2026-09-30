@@ -298,7 +298,7 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
                     measured_pose.shape != (6,) or not np.isfinite(measured_pose).all() or
                     not math.isfinite(gripper) or
                     gripper < gripper_min or gripper > gripper_max or
-                    np.linalg.norm(command_pose[:3] - home[:3]) > 0.0001):
+                    np.linalg.norm(command_pose[:3] - home[:3]) > server_step):
                 raise RuntimeError("Guarded server returned an invalid home command")
             if np.any(command_pose[:3] < workspace_min) or np.any(command_pose[:3] > workspace_max):
                 raise RuntimeError("Guarded server command is outside its workspace")
@@ -312,7 +312,7 @@ def guarded_start(client, model, interface, radius, max_tracking_error):
                     f"(limit {max_tracking_error:.4f} m)")
             time.sleep(0.1)
             state = client.request("SET_EE_POSE", {
-                "ee_pose": command_pose, "gripper_pos": gripper})
+                "ee_pose": home, "gripper_pos": gripper})
     except BaseException:
         try:
             client.request("SET_TO_DAMPING")
@@ -351,7 +351,7 @@ def parse_args():
     parser.add_argument("--speed", type=positive, help="Target speed cap in m/s")
     parser.add_argument("--radius", type=positive, help="Target radius around SDK home in meters")
     parser.add_argument("--wide-range", action="store_true",
-                        help="Allow up to 0.02 m/s and 0.15 m within measured server workspace")
+                        help="Allow up to 0.02 m/s and 0.50 m within the server workspace")
     parser.add_argument("--input-jump-limit", type=positive, default=0.1,
                         help="Reanchor after a larger Quest position step in meters")
     parser.add_argument("--max-tracking-error", type=positive, default=0.006,
@@ -367,7 +367,7 @@ def parse_args():
         if missing or not args.reset_to_home:
             parser.error("Control requires --interface --scale --xyz-map --speed "
                          "--radius --reset-to-home")
-        speed_limit, radius_limit = (0.02, 0.15) if args.wide_range else (0.01, 0.02)
+        speed_limit, radius_limit = (0.02, 0.50) if args.wide_range else (0.01, 0.02)
         if args.speed > speed_limit or args.radius > radius_limit:
             parser.error(
                 f"Control is limited to {speed_limit:.2f} m/s and a "
