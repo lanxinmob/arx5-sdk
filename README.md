@@ -56,9 +56,11 @@ During the A/X button trial, the installed Quest app produced an undocumented
 `PosCmd` pattern: `time_count=1107`, `gripper=0`, and near-zero rotation. The
 bridge interprets one second of this pattern as a reset request, so those
 packets do not close the gripper. Side-trigger packets with changing gripper
-values keep normal gripper control. This mapping has been checked with a fake
-joint server, not on powered arms. If the Quest app changes the packet pattern,
-the button reset will no longer be recognized.
+values keep normal gripper control. If both sides show the pattern together,
+the bridge holds position instead of treating either as a single-arm reset.
+This mapping has been checked with a fake joint server, not on powered arms.
+If the Quest app changes the packet pattern, the button reset will no longer
+be recognized.
 
 The locally patched SDK holds a blocked gripper at its measured contact width
 at 0.75 Nm and relieves the command by 1 mm. Open by at least 0.5 mm to release
