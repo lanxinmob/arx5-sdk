@@ -59,29 +59,38 @@ class Arx5AgentSafeServer:
         controller_config = arx5.ControllerConfigFactory.get_instance().get_config(
             "cartesian_controller", robot_config.joint_dof
         )
-        self.controller = arx5.Arx5CartesianController(
-            robot_config, controller_config, interface
-        )
-
-        home_pose = self.controller.get_home_pose().copy()
-        self.guard = AgentActionGuard(
-            home_pose,
-            max_position_delta=max_position_delta,
-            max_rpy_delta=max_rpy_delta,
-            gripper_min=gripper_min,
-            gripper_max=gripper_max,
-            max_gripper_delta=max_gripper_delta,
-            max_home_translation_radius=max_home_translation_radius,
-            workspace_min=workspace_min,
-            workspace_max=workspace_max,
-        )
-
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)
         self.socket.setsockopt(zmq.LINGER, 0)
-        self.socket.bind(f"tcp://{zmq_ip}:{zmq_port}")
-        self.poller = zmq.Poller()
-        self.poller.register(self.socket, zmq.POLLIN)
+        self.controller = None
+        try:
+            self.socket.bind(f"tcp://{zmq_ip}:{zmq_port}")
+            self.controller = arx5.Arx5CartesianController(
+                robot_config, controller_config, interface
+            )
+            home_pose = self.controller.get_home_pose().copy()
+            self.guard = AgentActionGuard(
+                home_pose,
+                max_position_delta=max_position_delta,
+                max_rpy_delta=max_rpy_delta,
+                gripper_min=gripper_min,
+                gripper_max=gripper_max,
+                max_gripper_delta=max_gripper_delta,
+                max_home_translation_radius=max_home_translation_radius,
+                workspace_min=workspace_min,
+                workspace_max=workspace_max,
+            )
+            self.poller = zmq.Poller()
+            self.poller.register(self.socket, zmq.POLLIN)
+        except BaseException:
+            if self.controller is not None:
+                try:
+                    self.controller.set_to_damping()
+                except Exception:
+                    print(_exception_text())
+            self.socket.close()
+            self.context.term()
+            raise
 
         self.zmq_ip = zmq_ip
         self.zmq_port = zmq_port
