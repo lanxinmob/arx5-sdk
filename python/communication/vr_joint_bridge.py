@@ -371,6 +371,8 @@ def parse_args():
     parser.add_argument("--right-camera", default=RIGHT_CAMERA)
     parser.add_argument("--left-camera", default=LEFT_CAMERA)
     parser.add_argument("--no-preview", action="store_true")
+    parser.add_argument("--record-video", nargs="?", const="", metavar="MP4",
+                        help="Record the wrist preview (default: ~/Videos/arx5/)")
     for side in ("right", "left"):
         parser.add_argument(f"--{side}-frame-rpy", nargs=3, type=float,
                             default=(0, 0, 0), metavar=("ROLL", "PITCH", "YAW"))
@@ -385,6 +387,17 @@ def parse_args():
         parser.error("Use 0 < hold-timeout < input-timeout")
     if args.joint_average_window < 1:
         parser.error("Use joint-average-window >= 1")
+    if args.record_video is not None and args.no_preview:
+        parser.error("Recording requires the wrist camera preview")
+    if args.record_video is not None and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        parser.error("Recording requires a desktop display")
+    if args.record_video:
+        recording_path = Path(args.record_video).expanduser().absolute()
+        if recording_path.suffix.lower() != ".mp4":
+            parser.error("Recording path must end in .mp4")
+        if recording_path.exists():
+            parser.error(f"Recording already exists: {recording_path}")
+        args.record_video = str(recording_path)
     if not args.no_preview and Path(args.right_camera).resolve() == Path(args.left_camera).resolve():
         parser.error("Wrist cameras must use different devices")
     if (args.right_port == args.left_port or any(
@@ -420,10 +433,15 @@ def main():
             if not args.no_preview:
                 if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
                     try:
-                        preview = subprocess.Popen([
+                        preview_cmd = [
                             sys.executable, "-u", str(Path(__file__).with_name("wrist_camera_preview.py")),
                             args.right_camera, args.left_camera,
-                        ], start_new_session=True)
+                        ]
+                        if args.record_video is not None:
+                            preview_cmd.append("--record-video")
+                            if args.record_video:
+                                preview_cmd.append(args.record_video)
+                        preview = subprocess.Popen(preview_cmd, start_new_session=True)
                     except OSError as error:
                         print(f"Wrist camera preview unavailable: {error}", flush=True)
                 else:
@@ -482,7 +500,7 @@ def main():
             if preview is not None and preview.poll() is None:
                 preview.terminate()
                 try:
-                    preview.wait(timeout=3)
+                    preview.wait(timeout=6)
                 except subprocess.TimeoutExpired:
                     preview.kill()
                     preview.wait()

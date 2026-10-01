@@ -31,6 +31,11 @@ Closing the window leaves teleoperation running; stopping the bridge closes it.
 Use `--right-camera` and `--left-camera` to override the stable V4L2 device paths,
 or `--no-preview` when running without a desktop display.
 
+Add `--record-video` to the bridge command to save the same left/right 4:3 view
+as an MP4 in `~/Videos/arx5/` with a timestamped filename. To choose a path,
+use `--record-video /path/to/session.mp4`. Recording ends and the MP4 is finalized
+when the preview window closes or the bridge stops. Existing files are not overwritten.
+
 Open or reconnect the Quest app after the bridge starts. Once both hand
 streams arrive, the bridge moves both arms to SDK home and opens the grippers.
 Keep their full homing paths clear. The Quest app connects over Wi-Fi as a TCP
