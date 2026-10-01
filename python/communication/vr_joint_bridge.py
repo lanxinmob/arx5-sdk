@@ -25,6 +25,7 @@ DT = 0.02
 POSE_FIELDS = ("x", "y", "z", "roll", "pitch", "yaw")
 RESET_COUNTER = 1107
 RESET_HOLD = 1.0
+MEASURED_OVERSHOOT_TOLERANCE = 0.1
 RIGHT_CAMERA = "/dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0"
 LEFT_CAMERA = "/dev/v4l/by-id/usb-MACROSILICON_Vin_4_20250814-video-index0"
 
@@ -175,9 +176,17 @@ class Planner:
         if state.get("emergency") is not False or state.get("armed") is not True:
             raise ValueError("Joint server is disarmed or in emergency")
         q = vector(state["joint_pos"], self.robot.joint_dof)
-        if np.any(q < self.robot.joint_pos_min) or np.any(q > self.robot.joint_pos_max):
-            raise ValueError("Measured joint outside SDK limits")
-        return q
+        outside = np.maximum(np.maximum(self.robot.joint_pos_min - q,
+                                        q - self.robot.joint_pos_max), 0)
+        if np.max(outside) > MEASURED_OVERSHOOT_TOLERANCE:
+            joint = int(np.argmax(outside))
+            lower = q[joint] < self.robot.joint_pos_min[joint]
+            limit = (self.robot.joint_pos_min if lower else self.robot.joint_pos_max)[joint]
+            raise ValueError(f"Measured joint {joint + 1} at {q[joint]:.4f} rad "
+                             f"exceeds SDK {'min' if lower else 'max'} {limit:.4f} rad "
+                             f"by {outside[joint]:.4f} rad")
+        # Keep command seeds inside the SDK bounds during brief feedback overshoot.
+        return np.clip(q, self.robot.joint_pos_min, self.robot.joint_pos_max)
 
     def solve(self, desired, actual_pose, seed_q):
         delta_rotation = (rotation(desired) * rotation(actual_pose).inv()).as_rotvec()

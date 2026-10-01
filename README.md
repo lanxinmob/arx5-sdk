@@ -56,8 +56,11 @@ averages five IK joint targets before the velocity step by default. Use
 smoothing at the cost of more lag. Averaging cannot correct missing Quest poses
 or unreachable IK targets. The bridge has no additional workspace-radius or
 Cartesian speed cap. Unreachable poses hold at the IK boundary. When the bridge
-stops, including Ctrl+C, Quest packet
-loss outside a button reset, or a measured joint outside the SDK limit, it asks
+receives measured feedback up to 0.1 rad outside an SDK joint bound, it clips
+the planning seed back to that bound and continues commanding within the SDK
+limits. Larger excursions stop with the joint number and amount in the error.
+When the bridge stops, including Ctrl+C, Quest packet loss outside a button reset,
+or a larger measured joint excursion, it asks
 each healthy armed server to move slowly to joint zero in two waypoints, keeping
 the current gripper opening, then requests damping. A server also attempts this return
 after two seconds without accepted targets or when it stops. Return planning
