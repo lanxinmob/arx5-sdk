@@ -27,6 +27,9 @@ python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
 Starting the bridge also opens a 4:3 desktop window. The first row shows the
 iPhUMI iPhone main camera over USB; the second row shows the left wrist (Vin 4)
 and right wrist (Vin 1). The iPhone app must be in Deployment USB streaming mode.
+To use the iPhUMI ultrawide camera in the primary view, add
+`--primary-camera ultrawide` to the bridge command; `main` is the default.
+The ultrawide USB stream uses port 5556 and is included when recording.
 The preview reconnects if a camera is unavailable without interrupting arm control.
 Closing the window leaves teleoperation running; stopping the bridge closes it.
 Use `--right-camera` and `--left-camera` to override the stable V4L2 device paths,

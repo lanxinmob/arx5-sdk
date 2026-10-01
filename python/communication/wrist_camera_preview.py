@@ -1,4 +1,4 @@
-"""Show the iPhUMI main camera and two wrist cameras during VR control."""
+"""Show a selected iPhUMI camera and two wrist cameras during VR control."""
 
 import argparse
 from datetime import datetime
@@ -18,7 +18,7 @@ WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = WINDOW_WIDTH * 3 // 4
 MAIN_HEIGHT = 600
 WINDOW = "ARX5 Cameras"
-IPHUMI_MAIN_PORT = 5555
+IPHUMI_PORTS = {"main": 5555, "ultrawide": 5556}
 
 
 class CameraFeed:
@@ -63,7 +63,7 @@ class CameraFeed:
         self.thread.join(timeout=2)
 
 
-def receive_iphone_usb(sender):
+def receive_iphone_usb(sender, port):
     try:
         import pypeertalk
     except ImportError:
@@ -77,7 +77,7 @@ def receive_iphone_usb(sender):
                 devices = pypeertalk.get_connected_devices()
                 if devices:
                     sender.send_bytes(b"")
-                    client = pypeertalk.PeerTalkClient(devices[0], IPHUMI_MAIN_PORT, 1)
+                    client = pypeertalk.PeerTalkClient(devices[0], port, 1)
                     while True:
                         message = client.get_latest_message(1000)
                         if not message:
@@ -96,7 +96,8 @@ def receive_iphone_usb(sender):
 class IPhoneUSBFeed:
     unavailable_status = "IPHUMI USB UNAVAILABLE"
 
-    def __init__(self):
+    def __init__(self, stream):
+        self.stream = stream
         self.context = multiprocessing.get_context("spawn")
         self.frame = None
         self.received = 0.0
@@ -106,7 +107,7 @@ class IPhoneUSBFeed:
     def start(self):
         self.receiver, sender = self.context.Pipe(duplex=False)
         self.process = self.context.Process(target=receive_iphone_usb,
-                                            args=(sender,), daemon=True)
+                                            args=(sender, IPHUMI_PORTS[self.stream]), daemon=True)
         try:
             self.process.start()
         finally:
@@ -130,7 +131,7 @@ class IPhoneUSBFeed:
             frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
             if frame is not None:
                 if self.received == 0:
-                    print(f"iPHUMI USB main: {frame.shape[1]}x{frame.shape[0]}", flush=True)
+                    print(f"iPHUMI USB {self.stream}: {frame.shape[1]}x{frame.shape[0]}", flush=True)
                 self.frame = frame
                 self.received = time.monotonic()
         now = time.monotonic()
@@ -189,6 +190,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("right_camera")
     parser.add_argument("left_camera")
+    parser.add_argument("--primary-camera", choices=tuple(IPHUMI_PORTS), default="main")
     parser.add_argument("--record-video", nargs="?", const="", metavar="MP4")
     args = parser.parse_args()
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
@@ -217,7 +219,7 @@ def main():
 
     feeds = []
     try:
-        feeds.append(IPhoneUSBFeed())
+        feeds.append(IPhoneUSBFeed(args.primary_camera))
         feeds.append(CameraFeed(args.left_camera))
         feeds.append(CameraFeed(args.right_camera))
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
@@ -227,7 +229,8 @@ def main():
             canvas = np.full((WINDOW_HEIGHT, WINDOW_WIDTH, 3),
                              (24, 27, 30), dtype=np.uint8)
             views = (
-                ((0, 0, WINDOW_WIDTH, MAIN_HEIGHT), "IPHUMI MAIN", feeds[0]),
+                ((0, 0, WINDOW_WIDTH, MAIN_HEIGHT),
+                 f"IPHUMI {args.primary_camera.upper()}", feeds[0]),
                 ((0, MAIN_HEIGHT, WINDOW_WIDTH // 2, WINDOW_HEIGHT - MAIN_HEIGHT),
                  "LEFT WRIST", feeds[1]),
                 ((WINDOW_WIDTH // 2, MAIN_HEIGHT, WINDOW_WIDTH // 2,

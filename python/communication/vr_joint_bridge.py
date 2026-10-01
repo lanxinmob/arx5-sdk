@@ -370,6 +370,8 @@ def parse_args():
                         help="IK joint targets to average (1 disables filtering)")
     parser.add_argument("--right-camera", default=RIGHT_CAMERA)
     parser.add_argument("--left-camera", default=LEFT_CAMERA)
+    parser.add_argument("--primary-camera", choices=("main", "ultrawide"), default="main",
+                        help="iPhUMI USB camera for the primary view")
     parser.add_argument("--no-preview", action="store_true")
     parser.add_argument("--record-video", nargs="?", const="", metavar="MP4",
                         help="Record all three camera views (default: ~/Videos/arx5/)")
@@ -436,6 +438,7 @@ def main():
                         preview_cmd = [
                             sys.executable, "-u", str(Path(__file__).with_name("wrist_camera_preview.py")),
                             args.right_camera, args.left_camera,
+                            "--primary-camera", args.primary_camera,
                         ]
                         if args.record_video is not None:
                             preview_cmd.append("--record-video")
