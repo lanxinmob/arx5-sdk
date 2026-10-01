@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -24,6 +25,8 @@ DT = 0.02
 POSE_FIELDS = ("x", "y", "z", "roll", "pitch", "yaw")
 RESET_COUNTER = 1107
 RESET_HOLD = 1.0
+RIGHT_CAMERA = "/dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0"
+LEFT_CAMERA = "/dev/v4l/by-id/usb-MACROSILICON_Vin_4_20250814-video-index0"
 
 
 def vector(value, size):
@@ -356,6 +359,9 @@ def parse_args():
     parser.add_argument("--rotation-scale", type=float, default=1.0)
     parser.add_argument("--joint-average-window", type=int, default=5,
                         help="IK joint targets to average (1 disables filtering)")
+    parser.add_argument("--right-camera", default=RIGHT_CAMERA)
+    parser.add_argument("--left-camera", default=LEFT_CAMERA)
+    parser.add_argument("--no-preview", action="store_true")
     for side in ("right", "left"):
         parser.add_argument(f"--{side}-frame-rpy", nargs=3, type=float,
                             default=(0, 0, 0), metavar=("ROLL", "PITCH", "YAW"))
@@ -370,6 +376,8 @@ def parse_args():
         parser.error("Use 0 < hold-timeout < input-timeout")
     if args.joint_average_window < 1:
         parser.error("Use joint-average-window >= 1")
+    if not args.no_preview and Path(args.right_camera).resolve() == Path(args.left_camera).resolve():
+        parser.error("Wrist cameras must use different devices")
     if (args.right_port == args.left_port or any(
             not 1 <= port <= 65535 for port in (args.port, args.right_port, args.left_port))):
         parser.error("Use valid ports and distinct joint server ports")
@@ -384,6 +392,7 @@ def main():
     inputs = Inputs(args.input_timeout)
     stop, active, start, failed = (threading.Event() for _ in range(4))
     workers = []
+    preview = None
 
     def interrupt(signum, frame):
         stop.set()
@@ -399,6 +408,17 @@ def main():
                                     args=(listener, inputs, stop, active, failed))
         receiver.start()
         try:
+            if not args.no_preview:
+                if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+                    try:
+                        preview = subprocess.Popen([
+                            sys.executable, "-u", str(Path(__file__).with_name("wrist_camera_preview.py")),
+                            args.right_camera, args.left_camera,
+                        ], start_new_session=True)
+                    except OSError as error:
+                        print(f"Wrist camera preview unavailable: {error}", flush=True)
+                else:
+                    print("Wrist camera preview unavailable: no desktop display", flush=True)
             print(f"Quest bridge listening on {args.bind}:{args.port}; waiting for both hands", flush=True)
             while not stop.is_set():
                 try:
@@ -439,6 +459,9 @@ def main():
             while not stop.wait(0.02):
                 if all(event.is_set() for event in ready):
                     start.set()
+                if preview is not None and preview.poll() is not None:
+                    print(f"Wrist camera preview exited ({preview.returncode}); teleoperation continues", flush=True)
+                    preview = None
         except Exception as error:
             print(f"STOP: {type(error).__name__}: {error}", flush=True)
             failed.set()
@@ -447,6 +470,13 @@ def main():
             for worker in workers:
                 worker.join()
             receiver.join()
+            if preview is not None and preview.poll() is None:
+                preview.terminate()
+                try:
+                    preview.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    preview.kill()
+                    preview.wait()
     return int(failed.is_set())
 
 
