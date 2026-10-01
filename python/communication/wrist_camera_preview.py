@@ -1,7 +1,8 @@
-"""Show the two wrist cameras without blocking the VR control loop."""
+"""Show the iPhUMI main camera and two wrist cameras during VR control."""
 
 import argparse
 from datetime import datetime
+import multiprocessing
 import os
 from pathlib import Path
 import signal
@@ -12,15 +13,17 @@ import cv2
 import numpy as np
 
 
-TILE_WIDTH = 640
 HEADER_HEIGHT = 40
-WINDOW_WIDTH = TILE_WIDTH * 2
+WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = WINDOW_WIDTH * 3 // 4
-TILE_HEIGHT = WINDOW_HEIGHT - HEADER_HEIGHT
-WINDOW = "ARX5 Wrist Cameras"
+MAIN_HEIGHT = 600
+WINDOW = "ARX5 Cameras"
+IPHUMI_MAIN_PORT = 5555
 
 
 class CameraFeed:
+    unavailable_status = "CAMERA UNAVAILABLE"
+
     def __init__(self, device):
         self.device = device
         self.frame = None
@@ -60,27 +63,125 @@ class CameraFeed:
         self.thread.join(timeout=2)
 
 
-def draw_feed(canvas, index, label, feed):
-    x = index * TILE_WIDTH
-    cv2.putText(canvas, label, (x + 16, 28), cv2.FONT_HERSHEY_SIMPLEX,
+def receive_iphone_usb(sender):
+    try:
+        import pypeertalk
+    except ImportError:
+        print("iPHUMI USB preview requires pypeertalk==0.1.2", flush=True)
+        sender.close()
+        return
+    try:
+        last_error = 0.0
+        while True:
+            try:
+                devices = pypeertalk.get_connected_devices()
+                if devices:
+                    sender.send_bytes(b"")
+                    client = pypeertalk.PeerTalkClient(devices[0], IPHUMI_MAIN_PORT, 1)
+                    while True:
+                        message = client.get_latest_message(1000)
+                        if not message:
+                            break
+                        sender.send_bytes(message)
+            except Exception as error:
+                now = time.monotonic()
+                if now - last_error >= 10:
+                    print(f"iPHUMI USB: {error}", flush=True)
+                    last_error = now
+            time.sleep(1)
+    finally:
+        sender.close()
+
+
+class IPhoneUSBFeed:
+    unavailable_status = "IPHUMI USB UNAVAILABLE"
+
+    def __init__(self):
+        self.context = multiprocessing.get_context("spawn")
+        self.frame = None
+        self.received = 0.0
+        self.connected = 0.0
+        self.start()
+
+    def start(self):
+        self.receiver, sender = self.context.Pipe(duplex=False)
+        self.process = self.context.Process(target=receive_iphone_usb,
+                                            args=(sender,), daemon=True)
+        try:
+            self.process.start()
+        finally:
+            sender.close()
+        self.started = time.monotonic()
+
+    def latest(self):
+        jpeg = None
+        try:
+            for _ in range(8):
+                if not self.receiver.poll():
+                    break
+                message = self.receiver.recv_bytes()
+                if message:
+                    jpeg = message
+                elif self.connected == 0:
+                    self.connected = time.monotonic()
+        except (EOFError, OSError):
+            pass
+        if jpeg:
+            frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is not None:
+                if self.received == 0:
+                    print(f"iPHUMI USB main: {frame.shape[1]}x{frame.shape[0]}", flush=True)
+                self.frame = frame
+                self.received = time.monotonic()
+        now = time.monotonic()
+        if ((not self.process.is_alive() and now - self.started > 5)
+                or (self.connected and now - max(self.received, self.connected) > 5)):
+            self.close()
+            self.frame = None
+            self.received = 0.0
+            self.connected = 0.0
+            self.start()
+        return self.frame, self.received
+
+    def close(self):
+        if self.process.is_alive():
+            self.process.terminate()
+        self.process.join(timeout=1)
+        if self.process.is_alive():
+            self.process.kill()
+            self.process.join()
+        self.receiver.close()
+
+
+def draw_feed(canvas, bounds, label, feed):
+    x, y, width, height = bounds
+    cv2.putText(canvas, label, (x + 16, y + 28), cv2.FONT_HERSHEY_SIMPLEX,
                 0.75, (230, 230, 230), 2, cv2.LINE_AA)
     frame, received = feed.latest()
-    status = "CAMERA UNAVAILABLE"
+    status = feed.unavailable_status
     if frame is not None:
         if time.monotonic() - received > 1:
             status = "STALE FRAME"
-        elif int(frame.max()) <= 32 and int(frame.max()) - int(frame.min()) <= 2:
+        elif (isinstance(feed, CameraFeed) and int(frame.max()) <= 32
+              and int(frame.max()) - int(frame.min()) <= 2):
             status = "NO VIDEO SIGNAL"
         else:
-            height, width = frame.shape[:2]
-            scale = min(TILE_WIDTH / width, TILE_HEIGHT / height)
-            size = (max(1, int(width * scale)), max(1, int(height * scale)))
+            frame_height, frame_width = frame.shape[:2]
+            image_height = height - HEADER_HEIGHT
+            scale = min(width / frame_width, image_height / frame_height)
+            size = (max(1, int(frame_width * scale)),
+                    max(1, int(frame_height * scale)))
             image = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
-            left = x + (TILE_WIDTH - size[0]) // 2
-            top = HEADER_HEIGHT + (TILE_HEIGHT - size[1]) // 2
+            left = x + (width - size[0]) // 2
+            top = y + HEADER_HEIGHT + (image_height - size[1]) // 2
             canvas[top:top + size[1], left:left + size[0]] = image
             return
-    cv2.putText(canvas, status, (x + 170, 220), cv2.FONT_HERSHEY_SIMPLEX,
+    text_width, text_height = cv2.getTextSize(status, cv2.FONT_HERSHEY_SIMPLEX,
+                                               0.8, 2)[0]
+    cv2.putText(canvas, status,
+                (x + (width - text_width) // 2,
+                 y + HEADER_HEIGHT + (height - HEADER_HEIGHT + text_height) // 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
                 0.8, (80, 160, 255), 2, cv2.LINE_AA)
 
 
@@ -91,7 +192,7 @@ def main():
     parser.add_argument("--record-video", nargs="?", const="", metavar="MP4")
     args = parser.parse_args()
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        parser.error("A desktop display is required for the wrist camera preview")
+        parser.error("A desktop display is required for the camera preview")
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
@@ -100,7 +201,7 @@ def main():
     if args.record_video is not None:
         recording_path = (Path(args.record_video).expanduser() if args.record_video else
                           Path.home() / "Videos" / "arx5" /
-                          f"wrist-{datetime.now():%Y%m%d-%H%M%S-%f}.mp4")
+                          f"teleop-{datetime.now():%Y%m%d-%H%M%S-%f}.mp4")
         if recording_path.suffix.lower() != ".mp4":
             parser.error("Recording path must end in .mp4")
         if recording_path.exists():
@@ -112,10 +213,11 @@ def main():
             writer.release()
             recording_path.unlink(missing_ok=True)
             parser.error(f"Could not start MP4 recording: {recording_path}")
-        print(f"Recording wrist cameras to {recording_path}", flush=True)
+        print(f"Recording three camera views to {recording_path}", flush=True)
 
     feeds = []
     try:
+        feeds.append(IPhoneUSBFeed())
         feeds.append(CameraFeed(args.left_camera))
         feeds.append(CameraFeed(args.right_camera))
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
@@ -124,8 +226,19 @@ def main():
             tick = time.monotonic()
             canvas = np.full((WINDOW_HEIGHT, WINDOW_WIDTH, 3),
                              (24, 27, 30), dtype=np.uint8)
-            for index, (label, feed) in enumerate(zip(("LEFT WRIST", "RIGHT WRIST"), feeds)):
-                draw_feed(canvas, index, label, feed)
+            views = (
+                ((0, 0, WINDOW_WIDTH, MAIN_HEIGHT), "IPHUMI MAIN", feeds[0]),
+                ((0, MAIN_HEIGHT, WINDOW_WIDTH // 2, WINDOW_HEIGHT - MAIN_HEIGHT),
+                 "LEFT WRIST", feeds[1]),
+                ((WINDOW_WIDTH // 2, MAIN_HEIGHT, WINDOW_WIDTH // 2,
+                  WINDOW_HEIGHT - MAIN_HEIGHT), "RIGHT WRIST", feeds[2]),
+            )
+            for bounds, label, feed in views:
+                draw_feed(canvas, bounds, label, feed)
+            cv2.line(canvas, (0, MAIN_HEIGHT), (WINDOW_WIDTH, MAIN_HEIGHT),
+                     (70, 70, 70), 1)
+            cv2.line(canvas, (WINDOW_WIDTH // 2, MAIN_HEIGHT),
+                     (WINDOW_WIDTH // 2, WINDOW_HEIGHT), (70, 70, 70), 1)
             cv2.imshow(WINDOW, canvas)
             if writer is not None:
                 writer.write(canvas)
@@ -141,7 +254,7 @@ def main():
     finally:
         if writer is not None:
             writer.release()
-            print(f"Saved wrist camera recording: {recording_path}", flush=True)
+            print(f"Saved camera recording: {recording_path}", flush=True)
         for feed in feeds:
             feed.close()
         cv2.destroyAllWindows()

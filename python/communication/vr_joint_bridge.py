@@ -372,7 +372,7 @@ def parse_args():
     parser.add_argument("--left-camera", default=LEFT_CAMERA)
     parser.add_argument("--no-preview", action="store_true")
     parser.add_argument("--record-video", nargs="?", const="", metavar="MP4",
-                        help="Record the wrist preview (default: ~/Videos/arx5/)")
+                        help="Record all three camera views (default: ~/Videos/arx5/)")
     for side in ("right", "left"):
         parser.add_argument(f"--{side}-frame-rpy", nargs=3, type=float,
                             default=(0, 0, 0), metavar=("ROLL", "PITCH", "YAW"))
@@ -388,7 +388,7 @@ def parse_args():
     if args.joint_average_window < 1:
         parser.error("Use joint-average-window >= 1")
     if args.record_video is not None and args.no_preview:
-        parser.error("Recording requires the wrist camera preview")
+        parser.error("Recording requires the camera preview")
     if args.record_video is not None and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         parser.error("Recording requires a desktop display")
     if args.record_video:
@@ -443,9 +443,9 @@ def main():
                                 preview_cmd.append(args.record_video)
                         preview = subprocess.Popen(preview_cmd, start_new_session=True)
                     except OSError as error:
-                        print(f"Wrist camera preview unavailable: {error}", flush=True)
+                        print(f"Camera preview unavailable: {error}", flush=True)
                 else:
-                    print("Wrist camera preview unavailable: no desktop display", flush=True)
+                    print("Camera preview unavailable: no desktop display", flush=True)
             print(f"Quest bridge listening on {args.bind}:{args.port}; waiting for both hands", flush=True)
             while not stop.is_set():
                 try:
@@ -487,7 +487,7 @@ def main():
                 if all(event.is_set() for event in ready):
                     start.set()
                 if preview is not None and preview.poll() is not None:
-                    print(f"Wrist camera preview exited ({preview.returncode}); teleoperation continues", flush=True)
+                    print(f"Camera preview exited ({preview.returncode}); teleoperation continues", flush=True)
                     preview = None
         except Exception as error:
             print(f"STOP: {type(error).__name__}: {error}", flush=True)

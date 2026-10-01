@@ -24,14 +24,22 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
 ```
 
-Starting the bridge also opens a 4:3 desktop window with the left wrist camera
-on Vin 4 at left and the right wrist camera on Vin 1 at right. The window shows
-both full live views and reports missing video signal without interrupting arm control.
+Starting the bridge also opens a 4:3 desktop window. The first row shows the
+iPhUMI iPhone main camera over USB; the second row shows the left wrist (Vin 4)
+and right wrist (Vin 1). The iPhone app must be in Deployment USB streaming mode.
+The preview reconnects if a camera is unavailable without interrupting arm control.
 Closing the window leaves teleoperation running; stopping the bridge closes it.
 Use `--right-camera` and `--left-camera` to override the stable V4L2 device paths,
 or `--no-preview` when running without a desktop display.
+The `arx5` environment needs `pypeertalk==0.1.2` for iPhUMI USB streaming;
+it is installed on this machine. On another machine, install it once with
+`python -m pip install pypeertalk==0.1.2`.
+If the main view says `IPHUMI USB UNAVAILABLE`, unlock and trust the iPhone,
+select Deployment USB streaming in iPhUMI, and check that it appears in
+`python -c 'import pypeertalk; print(pypeertalk.get_connected_devices())'`.
+If the list stays empty, reconnect the iPhone directly to a PC USB port.
 
-Add `--record-video` to the bridge command to save the same left/right 4:3 view
+Add `--record-video` to the bridge command to save all three views in the 4:3 window
 as an MP4 in `~/Videos/arx5/` with a timestamped filename. To choose a path,
 use `--record-video /path/to/session.mp4`. Recording ends and the MP4 is finalized
 when the preview window closes or the bridge stops. Existing files are not overwritten.
