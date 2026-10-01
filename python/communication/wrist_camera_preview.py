@@ -10,8 +10,10 @@ import numpy as np
 
 
 TILE_WIDTH = 640
-TILE_HEIGHT = 360
 HEADER_HEIGHT = 40
+WINDOW_WIDTH = TILE_WIDTH * 2
+WINDOW_HEIGHT = WINDOW_WIDTH * 3 // 4
+TILE_HEIGHT = WINDOW_HEIGHT - HEADER_HEIGHT
 WINDOW = "ARX5 Wrist Cameras"
 
 
@@ -87,15 +89,15 @@ def main():
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         parser.error("A desktop display is required for the wrist camera preview")
 
-    feeds = [CameraFeed(args.right_camera), CameraFeed(args.left_camera)]
+    feeds = [CameraFeed(args.left_camera), CameraFeed(args.right_camera)]
     try:
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(WINDOW, TILE_WIDTH * 2, TILE_HEIGHT + HEADER_HEIGHT)
+        cv2.resizeWindow(WINDOW, WINDOW_WIDTH, WINDOW_HEIGHT)
         while True:
             tick = time.monotonic()
-            canvas = np.full((TILE_HEIGHT + HEADER_HEIGHT, TILE_WIDTH * 2, 3),
+            canvas = np.full((WINDOW_HEIGHT, WINDOW_WIDTH, 3),
                              (24, 27, 30), dtype=np.uint8)
-            for index, (label, feed) in enumerate(zip(("RIGHT WRIST", "LEFT WRIST"), feeds)):
+            for index, (label, feed) in enumerate(zip(("LEFT WRIST", "RIGHT WRIST"), feeds)):
                 draw_feed(canvas, index, label, feed)
             cv2.imshow(WINDOW, canvas)
             key = cv2.waitKey(1) & 0xFF

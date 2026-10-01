@@ -24,9 +24,9 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/vr_joint_bridge.py --right-model X5_umi --left-model X5
 ```
 
-Starting the bridge also opens a desktop window with the right wrist camera on
-Vin 1 and the left wrist camera on Vin 4. The window shows both live views side
-by side and reports missing video signal without interrupting arm control.
+Starting the bridge also opens a 4:3 desktop window with the left wrist camera
+on Vin 4 at left and the right wrist camera on Vin 1 at right. The window shows
+both full live views and reports missing video signal without interrupting arm control.
 Closing the window leaves teleoperation running; stopping the bridge closes it.
 Use `--right-camera` and `--left-camera` to override the stable V4L2 device paths,
 or `--no-preview` when running without a desktop display.
