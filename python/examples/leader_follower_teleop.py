@@ -252,7 +252,11 @@ class LeaderFollowerTeleop:
                         f"kp={np.round(gain.kp(), 3).tolist()} "
                         f"kd={np.round(gain.kd(), 3).tolist()} "
                         f"torque_cmd={np.round(command.torque(), 3).tolist()} "
-                        f"velocity={np.round(state.vel(), 3).tolist()}",
+                        f"velocity={np.round(state.vel(), 3).tolist()} "
+                        f"gripper_mm={state.gripper_pos * 1000:.2f} "
+                        f"gripper_cmd_mm={command.gripper_pos * 1000:.2f} "
+                        f"gripper_torque={state.gripper_torque:.3f} "
+                        f"gripper_kp={gain.gripper_kp:.3f}",
                         flush=True,
                     )
             time.sleep(self.controller_dt)
