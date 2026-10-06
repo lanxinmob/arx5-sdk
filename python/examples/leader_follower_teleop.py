@@ -61,6 +61,7 @@ class LeaderFollowerTeleop:
         vel_ratio: float,
         force_scale: float,
         follower_gravity_scale: float = 1.0,
+        leader_gravity_scale: float = 1.0,
     ):
         assert leader_interface != follower_interface
         # Gripper force feedback gain: the leader's gripper motor is fed with
@@ -89,6 +90,7 @@ class LeaderFollowerTeleop:
         # controllers. get_robot_config() returns a copy, so changing it after
         # construction has no effect.
         leader_robot_config = arx5.RobotConfigFactory.get_instance().get_config(leader_model)
+        leader_robot_config.gravity_vector = leader_robot_config.gravity_vector * leader_gravity_scale
         self.leader_controller_config = arx5.ControllerConfigFactory.get_instance().get_config(
             "joint_controller", leader_robot_config.joint_dof
         )
@@ -293,6 +295,8 @@ class LeaderFollowerTeleop:
     "direction.",
 )
 @click.option("--diagnostics", is_flag=True, help="Print actual gains, output torque and fault state once per second")
+@click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Leader gravity compensation multiplier")
+@click.option("--follower-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Follower gravity compensation multiplier")
 def main(
     leader_model: str,
     leader_interface: str,
@@ -305,6 +309,8 @@ def main(
     vel_ratio: float,
     force_scale: float,
     diagnostics: bool,
+    leader_gravity_scale: float,
+    follower_gravity_scale: float,
 ):
     # Keep recorder imports usable in terminals without an X server.
     from pynput.keyboard import Key, KeyCode
@@ -313,6 +319,7 @@ def main(
 
     np.set_printoptions(precision=3, suppress=True)
     print(f"SDK: {arx5.__file__}", flush=True)
+    print(f"Gravity multipliers: leader={leader_gravity_scale:g}, follower={follower_gravity_scale:g}", flush=True)
     teleop = LeaderFollowerTeleop(
         leader_model,
         leader_interface,
@@ -324,6 +331,8 @@ def main(
         leader_gripper_kd,
         vel_ratio,
         force_scale,
+        follower_gravity_scale=follower_gravity_scale,
+        leader_gravity_scale=leader_gravity_scale,
     )
     teleop.diagnostics = diagnostics
     teleop.start()

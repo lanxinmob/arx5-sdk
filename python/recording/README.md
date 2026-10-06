@@ -90,6 +90,16 @@ recorder 不再主动调用 `set_to_damping()`。**SDK 原有析构行为仍会�
 
 ## X5_umi 下坠调整
 
+两臂补偿倍率分别通过 `--leader-gravity-scale`（默认 1.0）和 `--follower-gravity-scale` 设置。
+先增加 20% 对比手感，可在遥操或采集命令末尾添加 `--leader-gravity-scale 1.2 --follower-gravity-scale 1.2 --diagnostics`。
+例如在 `python` 目录运行：
+
+```bash
+python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --leader-gravity-scale 1.2 --follower-gravity-scale 1.2 --diagnostics
+```
+
+退出当前控制程序后再启动新命令；启动时托住机械臂，倍率过大可能上飘。参数在控制器创建前生效，运行中的旧进程不会自动更新。
+
 从臂重力补偿已显式开启；待机保持 `kp=0`，不通过锁定位置来实现拖动模式。
 从臂待机阻尼改为独立参数 `--follower-idle-kd-scale 0.5`，不再跟随主臂的 0.05 倍阻尼。
 阻尼可以降低漂移速度，但无法在静止时补足重力模型误差。
