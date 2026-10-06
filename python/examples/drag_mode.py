@@ -36,7 +36,7 @@ import sys
 import numpy as np
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 import arx5_interface as arx5
 import click

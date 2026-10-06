@@ -41,7 +41,7 @@ import sys
 import numpy as np
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 import arx5_interface as arx5
 import click
@@ -83,6 +83,7 @@ class LeaderFollowerTeleop:
         # would keep overriding the home trajectory.
         self.command_enabled = True
         self.teleop_started = False
+        self.diagnostics = False
 
         # IMPORTANT: build and modify the configs BEFORE constructing the
         # controllers. get_robot_config() returns a copy, so changing it after
@@ -198,6 +199,7 @@ class LeaderFollowerTeleop:
         Default arguments preserve standalone teleoperation behavior.
         """
         hold_cmd = arx5.JointState(self.dof)
+        next_report = 0.0
         while stop_event is None or not stop_event.is_set():
             if not self.command_enabled:
                 time.sleep(self.controller_dt)
@@ -234,6 +236,23 @@ class LeaderFollowerTeleop:
                 self.follower.set_joint_cmd(hold_cmd)
                 # Do not leave the last grasp feedback torque active while paused.
                 self._apply_gripper_force_feedback(leader_state, 0.0)
+            if self.diagnostics and time.monotonic() >= next_report:
+                next_report = time.monotonic() + 1.0
+                for name in ("leader", "follower"):
+                    controller = getattr(self, name)
+                    config = controller.get_controller_config()
+                    gain = controller.get_gain()
+                    state = controller.get_joint_state()
+                    command = controller.get_joint_cmd()
+                    print(
+                        f"[diagnostics] {name} following={self.teleop_started} "
+                        f"gravity={config.gravity_compensation} emergency={controller.is_emergency()} "
+                        f"kp={np.round(gain.kp(), 3).tolist()} "
+                        f"kd={np.round(gain.kd(), 3).tolist()} "
+                        f"torque_cmd={np.round(command.torque(), 3).tolist()} "
+                        f"velocity={np.round(state.vel(), 3).tolist()}",
+                        flush=True,
+                    )
             time.sleep(self.controller_dt)
 
 
@@ -273,6 +292,7 @@ class LeaderFollowerTeleop:
     "gripper torque. 0 disables the haptic feedback, negative inverts the "
     "direction.",
 )
+@click.option("--diagnostics", is_flag=True, help="Print actual gains, output torque and fault state once per second")
 def main(
     leader_model: str,
     leader_interface: str,
@@ -284,6 +304,7 @@ def main(
     leader_gripper_kd: float,
     vel_ratio: float,
     force_scale: float,
+    diagnostics: bool,
 ):
     # Keep recorder imports usable in terminals without an X server.
     from pynput.keyboard import Key, KeyCode
@@ -291,6 +312,7 @@ def main(
     space_keys = (Key.space, KeyCode(char=" "))
 
     np.set_printoptions(precision=3, suppress=True)
+    print(f"SDK: {arx5.__file__}", flush=True)
     teleop = LeaderFollowerTeleop(
         leader_model,
         leader_interface,
@@ -303,6 +325,7 @@ def main(
         vel_ratio,
         force_scale,
     )
+    teleop.diagnostics = diagnostics
     teleop.start()
 
     control_error = []
@@ -312,6 +335,7 @@ def main(
             teleop.run()
         except Exception as e:
             control_error.append(e)
+            print(f"Teleoperation control failed: {e}", flush=True)
 
     control_thread = threading.Thread(target=control_loop, daemon=True)
     control_thread.start()
@@ -319,6 +343,8 @@ def main(
     try:
         with KeystrokeCounter() as key_counter:
             while True:
+                if control_error:
+                    raise control_error[0]
                 for key_stroke in key_counter.get_press_events():
                     if key_stroke in space_keys:
                         teleop.teleop_started = not teleop.teleop_started

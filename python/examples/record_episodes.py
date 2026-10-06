@@ -203,6 +203,7 @@ def parse_args():
     parser.add_argument("--camera-fps", type=positive, default=60)
     parser.add_argument("--sample-clock", choices=("camera", "periodic"), default="camera",help="Drive samples from new wrist-camera frames or a periodic timer")
     parser.add_argument("--control-hz", type=positive, default=500, help="Python teleop loop target Hz; SDK servo rate unchanged")
+    parser.add_argument("--diagnostics", action="store_true", help="Print actual gains, output torque and fault state once per second")
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--image-size", type=int, default=256,help="Square RGB size saved after UMI resize + center crop")
@@ -327,6 +328,7 @@ def main():
         else:
             from recording.robot_lifecycle import RecordingTeleop
             import arx5_interface as arx5
+            print(f"SDK: {arx5.__file__}", flush=True)
             teleop = RecordingTeleop(
                 args.leader_model, args.leader_interface, args.follower_model, args.follower_interface,
                 args.gripper_open_readout, args.leader_kp, args.leader_kd_scale,
@@ -334,6 +336,7 @@ def main():
                 follower_gravity_scale=args.follower_gravity_scale,
             )
             session = Session(teleop, preview)
+            teleop.diagnostics = args.diagnostics
             teleop.home_seconds = args.home_seconds
             teleop.home_speed = args.home_speed
             teleop.follower_idle_kd_scale = args.follower_idle_kd_scale
