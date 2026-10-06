@@ -62,6 +62,7 @@ class LeaderFollowerTeleop:
         force_scale: float,
         follower_gravity_scale: float = 1.0,
         leader_gravity_scale: float = 1.0,
+        follower_gripper_open_readout: float = None,
     ):
         assert leader_interface != follower_interface
         # Gripper force feedback gain: the leader's gripper motor is fed with
@@ -109,8 +110,9 @@ class LeaderFollowerTeleop:
             "joint_controller", follower_robot_config.joint_dof
         )
         self.follower_controller_config.gravity_compensation = True
-        if gripper_open_readout != 0.0:
-            follower_robot_config.gripper_open_readout = gripper_open_readout
+        follower_readout = gripper_open_readout if follower_gripper_open_readout is None else follower_gripper_open_readout
+        if follower_readout != 0.0:
+            follower_robot_config.gripper_open_readout = follower_readout
 
         assert leader_robot_config.joint_dof == follower_robot_config.joint_dof
         self.dof = leader_robot_config.joint_dof
@@ -301,6 +303,7 @@ class LeaderFollowerTeleop:
 @click.option("--diagnostics", is_flag=True, help="Print actual gains, output torque and fault state once per second")
 @click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Leader gravity compensation multiplier")
 @click.option("--follower-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Follower gravity compensation multiplier")
+@click.option("--follower-gripper-open-readout", type=float, default=None, help="Override the follower's fully-open motor readout; 0 uses its model default")
 def main(
     leader_model: str,
     leader_interface: str,
@@ -315,6 +318,7 @@ def main(
     diagnostics: bool,
     leader_gravity_scale: float,
     follower_gravity_scale: float,
+    follower_gripper_open_readout: float,
 ):
     # Keep recorder imports usable in terminals without an X server.
     from pynput.keyboard import Key, KeyCode
@@ -337,6 +341,7 @@ def main(
         force_scale,
         follower_gravity_scale=follower_gravity_scale,
         leader_gravity_scale=leader_gravity_scale,
+        follower_gripper_open_readout=follower_gripper_open_readout,
     )
     teleop.diagnostics = diagnostics
     teleop.start()

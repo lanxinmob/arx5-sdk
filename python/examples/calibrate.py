@@ -4,7 +4,7 @@ import time
 import click
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
-sys.path.append(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 import arx5_interface as arx5
 

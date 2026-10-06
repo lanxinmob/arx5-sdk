@@ -230,6 +230,7 @@ def parse_args():
     parser.add_argument("--follower-gravity-scale", type=positive, default=None, help="Follower gravity multiplier; default 1.05 for X5_umi, otherwise 1.0")
     parser.add_argument("--leader-gravity-scale", type=positive, default=1.0, help="Leader gravity multiplier (default 1.0)")
     parser.add_argument("--gripper-open-readout", "-g", type=float, default=-3.4)
+    parser.add_argument("--follower-gripper-open-readout", type=float, default=None, help="Override follower fully-open motor readout; 0 uses its model default")
     parser.add_argument("--leader-kp", type=float, default=0.0)
     parser.add_argument("--leader-kd-scale", type=float, default=0.05)
     parser.add_argument("--leader-gripper-kd", type=float, default=0.05)
@@ -336,6 +337,7 @@ def main():
                 args.leader_gripper_kd, args.vel_ratio, args.force_scale,
                 follower_gravity_scale=args.follower_gravity_scale,
                 leader_gravity_scale=args.leader_gravity_scale,
+                follower_gripper_open_readout=args.follower_gripper_open_readout,
             )
             session = Session(teleop, preview)
             teleop.diagnostics = args.diagnostics
