@@ -231,6 +231,8 @@ def parse_args():
     parser.add_argument("--leader-gravity-scale", type=positive, default=1.0, help="Leader gravity multiplier (default 1.0)")
     parser.add_argument("--gripper-open-readout", "-g", type=float, default=-3.4)
     parser.add_argument("--follower-gripper-open-readout", type=float, default=None, help="Override follower fully-open motor readout; 0 uses its model default")
+    parser.add_argument("--gripper-close-threshold", type=float, default=0.0, help="Command fully closed below this leader width (m, 0 to 0.005)")
+    parser.add_argument("--follower-gripper-kp", type=positive, default=None, help="Follower gripper position gain override (up to 10)")
     parser.add_argument("--leader-kp", type=float, default=0.0)
     parser.add_argument("--leader-kd-scale", type=float, default=0.05)
     parser.add_argument("--leader-gripper-kd", type=float, default=0.05)
@@ -239,6 +241,10 @@ def parse_args():
     args = parser.parse_args()
     if args.fps > args.control_hz:
         parser.error("--fps must not exceed --control-hz")
+    if not np.isfinite(args.gripper_close_threshold) or not 0 <= args.gripper_close_threshold <= 0.005:
+        parser.error("--gripper-close-threshold must be between 0 and 0.005 m")
+    if args.follower_gripper_kp is not None and args.follower_gripper_kp > 10:
+        parser.error("--follower-gripper-kp must not exceed 10")
     if args.sample_clock == "camera" and not np.isclose(args.fps, args.camera_fps):
         parser.error("camera sample clock requires --fps and --camera-fps to match")
     if (args.width <= 0 or args.height <= 0 or args.image_size <= 0 or args.queue_size <= 0
@@ -338,6 +344,8 @@ def main():
                 follower_gravity_scale=args.follower_gravity_scale,
                 leader_gravity_scale=args.leader_gravity_scale,
                 follower_gripper_open_readout=args.follower_gripper_open_readout,
+                gripper_close_threshold=args.gripper_close_threshold,
+                follower_gripper_kp=args.follower_gripper_kp,
             )
             session = Session(teleop, preview)
             teleop.diagnostics = args.diagnostics

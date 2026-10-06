@@ -96,7 +96,7 @@ class RecordingTeleop(LeaderFollowerTeleop):
             previous = now
             leader = self.leader.get_joint_state()
             target = np.clip(leader.pos(), self.follower_pos_min, self.follower_pos_max)
-            target_gripper = float(np.clip(leader.gripper_pos, 0, self.follower_gripper_width))
+            target_gripper = self._follower_gripper_target(leader.gripper_pos)
             position += np.clip(target - position, -self.alignment_speed * dt, self.alignment_speed * dt)
             gripper += float(np.clip(target_gripper - gripper,
                                     -self.alignment_gripper_speed * dt, self.alignment_gripper_speed * dt))

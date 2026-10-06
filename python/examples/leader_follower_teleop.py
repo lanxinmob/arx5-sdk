@@ -63,8 +63,14 @@ class LeaderFollowerTeleop:
         follower_gravity_scale: float = 1.0,
         leader_gravity_scale: float = 1.0,
         follower_gripper_open_readout: float = None,
+        gripper_close_threshold: float = 0.0,
+        follower_gripper_kp: float = None,
     ):
         assert leader_interface != follower_interface
+        if not np.isfinite(gripper_close_threshold) or not 0 <= gripper_close_threshold <= 0.005:
+            raise ValueError("Gripper close threshold must be between 0 and 0.005 m")
+        if follower_gripper_kp is not None and (not np.isfinite(follower_gripper_kp) or not 0 < follower_gripper_kp <= 10):
+            raise ValueError("Follower gripper kp must be positive and at most 10")
         # Gripper force feedback gain: the leader's gripper motor is fed with
         # -force_scale * (follower's measured gripper torque). Per the SDK
         # convention, the follower's gripper torque is negative while it is
@@ -77,6 +83,7 @@ class LeaderFollowerTeleop:
         self.drag_kp = leader_kp
         self.drag_kd_scale = leader_kd_scale
         self.drag_gripper_kd = leader_gripper_kd
+        self.gripper_close_threshold = gripper_close_threshold
         # Velocity feedforward ratio: how much of the leader's joint velocity
         # is added to the follower command. Reduces tracking delay.
         self.vel_ratio = vel_ratio
@@ -110,6 +117,8 @@ class LeaderFollowerTeleop:
             "joint_controller", follower_robot_config.joint_dof
         )
         self.follower_controller_config.gravity_compensation = True
+        if follower_gripper_kp is not None:
+            self.follower_controller_config.default_gripper_kp = follower_gripper_kp
         follower_readout = gripper_open_readout if follower_gripper_open_readout is None else follower_gripper_open_readout
         if follower_readout != 0.0:
             follower_robot_config.gripper_open_readout = follower_readout
@@ -142,6 +151,11 @@ class LeaderFollowerTeleop:
         gain.gripper_kp = 0.0
         gain.gripper_kd = self.drag_gripper_kd
         self.leader.set_gain(gain)
+
+    def _follower_gripper_target(self, leader_width):
+        if leader_width <= self.gripper_close_threshold:
+            return 0.0
+        return float(np.clip(leader_width, 0.0, self.follower_gripper_width))
 
     def start(self):
         print("Resetting both arms to home position...")
@@ -220,9 +234,7 @@ class LeaderFollowerTeleop:
                 )
                 # Partial velocity feedforward reduces the following delay
                 follower_cmd.vel()[:] = leader_state.vel().copy() * self.vel_ratio
-                follower_cmd.gripper_pos = np.clip(
-                    leader_state.gripper_pos, 0.0, self.follower_gripper_width
-                )
+                follower_cmd.gripper_pos = self._follower_gripper_target(leader_state.gripper_pos)
                 self.follower.set_joint_cmd(follower_cmd)
                 command_time = time.monotonic()
                 # Haptics: let the operator feel what the follower gripper
@@ -304,6 +316,8 @@ class LeaderFollowerTeleop:
 @click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Leader gravity compensation multiplier")
 @click.option("--follower-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Follower gravity compensation multiplier")
 @click.option("--follower-gripper-open-readout", type=float, default=None, help="Override the follower's fully-open motor readout; 0 uses its model default")
+@click.option("--gripper-close-threshold", type=click.FloatRange(min=0.0, max=0.005), default=0.0, help="Command fully closed below this leader width (m)")
+@click.option("--follower-gripper-kp", type=click.FloatRange(min=0.0, min_open=True, max=10.0), default=None, help="Follower gripper position gain override (up to 10)")
 def main(
     leader_model: str,
     leader_interface: str,
@@ -319,6 +333,8 @@ def main(
     leader_gravity_scale: float,
     follower_gravity_scale: float,
     follower_gripper_open_readout: float,
+    gripper_close_threshold: float,
+    follower_gripper_kp: float,
 ):
     # Keep recorder imports usable in terminals without an X server.
     from pynput.keyboard import Key, KeyCode
@@ -342,6 +358,8 @@ def main(
         follower_gravity_scale=follower_gravity_scale,
         leader_gravity_scale=leader_gravity_scale,
         follower_gripper_open_readout=follower_gripper_open_readout,
+        gripper_close_threshold=gripper_close_threshold,
+        follower_gripper_kp=follower_gripper_kp,
     )
     teleop.diagnostics = diagnostics
     teleop.start()
