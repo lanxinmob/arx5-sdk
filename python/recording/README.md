@@ -17,14 +17,14 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 当前只有一台腕部相机，默认使用 Vin 1 的设备路径 `/dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0`（当前为 `/dev/video0`），记录为 `cam_wrist`；默认不开启主视角相机。
 2026-10-06 单腕部相机检查通过，实测接收约 59.8 FPS。Vin 2/3/4 返回固定像素值 7 的无信号灰画面，不作为采集视角。
 启动时先检查相机连续出帧，再让两臂同时回到 home，然后**两臂均进入重力补偿拖动模式**，可分别用手调整位置。
-参数 `-g` 默认 `-3.4`，沿用当前示例；应使用已标定的夹爪值。
+当前 X5/can1 主臂与 X5_umi/can0 从臂的遥操和采集默认值：主臂重力倍率 1.15、从臂 1.0；主臂 `-g -3.2969`、从臂 `--follower-gripper-open-readout -3.45369`；闭合阈值 `--gripper-close-threshold 0.001`。直接运行上面的命令即可使用，参数仍可显式覆盖。夹爪 kp 保持 SDK 默认 5；剩余小缝隙和闭合重复性尚未完全解决。更换机械臂后应重新标定。
 若拖动模式明显下坠，可添加 `--diagnostics`，每秒输出两臂实际重力补偿开关、故障状态、kp/kd、SDK 输出力矩及实测关节速度。启动时会打印加载的 SDK 路径；输出力矩是 SDK 命令，不代表电机实际产生了同等力矩。
 夹爪无法闭合时，同一输出中的 `gripper_mm` 是测量开度，`gripper_cmd_mm` 是 SDK 输出目标开度（单位 mm），同时显示夹爪实测力矩和 kp。请在空载闭合时比较两臂读数，确定是否需要零点标定；不要用开度偏移掩盖尚未确认的接触保持或机械阻力。
 
 若从臂读数接近 0 mm、实物仍有缝隙，可标定从臂夹爪：退出遥操/采集程序，将从臂放到稳定支撑的位置，在 `python` 目录运行 `python examples/calibrate.py X5_umi can0`。此程序关闭重力补偿；按终端提示手动完全闭合夹爪、回车设零，再手动完全张开、回车读取 `Fully-open joint position readout`。不要在遥操运行时同时启动标定程序。
 在后续遥操和采集命令中添加 `--follower-gripper-open-readout VALUE`，其中 `VALUE` 为该读数（保留正负号），仅覆盖从臂的全开角度；主臂仍使用 `-g` 参数。标定效果需要复查实物闭合及全开位置。
 标定后仍有缝隙时，先支撑机械臂并退出其他控制程序，运行 `python examples/calibrate.py X5_umi can0 --verify-zero --gripper-open-readout -3.45369`（最后数值替换为当前从臂全开读数）。验证模式关闭重力补偿但不重设零点；按提示依次轻轻闭合至指尖接触、全开、再次闭合，每次保持姿态并回车，记录三行 `[zero-check]`。`angle_rad` 是从 SDK 开度反算的电机角度，`width_mm` 仍是模型换算开度，不是指尖间距测量。两次闭合角度一致但不接近零，提示零点偏差；两次差异明显，需检查操作重复性或传动间隙。若无法让指尖自然接触，不要挤压变形来设零。
-若主臂闭合仍读到少量正开度，可添加 `--gripper-close-threshold 0.001`，将主臂 1 mm 以下的开度映射为从臂 0 mm 目标。先单独验证此项；若目标已为 0、从臂仍有跟随误差，可另加 `--follower-gripper-kp 10`（SDK 默认 5）对比闭合力度。两项默认均保持原行为，均适用于遥操和采集；不发送负开度，不改变电流保护和接触保持逻辑。若从臂读数已到 0、实物仍有缝，需要继续检查零点或夹爪传动结构。
+默认闭合阈值为 0.001 m，将主臂 1 mm 及以下的开度映射为从臂 0 mm 目标；设为 `--gripper-close-threshold 0` 可关闭正开度的归零阈值。若目标已为 0、从臂仍有跟随误差，可另加 `--follower-gripper-kp 10`（SDK 默认 5）对比闭合力度。两项均适用于遥操和采集；不发送负开度，不改变电流保护和接触保持逻辑。若从臂读数已到 0、实物仍有缝，需要继续检查零点或夹爪传动结构。
 
 1. 在同一入口选择语言指令或输入 `q` 退出，不必先填写指令。首次可直接输入“把红色方块放进碗里”。
 2. 后续列出历史：输入 `1` 复用第一条，`e 1` 将第一条放进可编辑输入行，直接输入文本创建新指令。
@@ -96,12 +96,11 @@ recorder 不再主动调用 `set_to_damping()`。**SDK 原有析构行为仍会�
 
 ## X5_umi 下坠调整
 
-两臂补偿倍率分别通过 `--leader-gravity-scale`（默认 1.0）和 `--follower-gravity-scale` 设置。
-先增加 20% 对比手感，可在遥操或采集命令末尾添加 `--leader-gravity-scale 1.2 --follower-gravity-scale 1.2 --diagnostics`。
-例如在 `python` 目录运行：
+两臂补偿倍率分别通过 `--leader-gravity-scale`（默认 1.15）和 `--follower-gravity-scale`（默认 1.0）设置。
+当前倍率按实机拖动反馈选定，遥操和采集保持一致。例如在 `python` 目录运行：
 
 ```bash
-python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --leader-gravity-scale 1.2 --follower-gravity-scale 1.2 --diagnostics
+python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --diagnostics
 ```
 
 退出当前控制程序后再启动新命令；启动时托住机械臂，倍率过大可能上飘。参数在控制器创建前生效，运行中的旧进程不会自动更新。
@@ -109,10 +108,9 @@ python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --leader-gravity-s
 从臂重力补偿已显式开启；待机保持 `kp=0`，不通过锁定位置来实现拖动模式。
 从臂待机阻尼改为独立参数 `--follower-idle-kd-scale 0.5`，不再跟随主臂的 0.05 倍阻尼。
 阻尼可以降低漂移速度，但无法在静止时补足重力模型误差。
-当从臂型号为 `X5_umi` 时，默认 `--follower-gravity-scale 1.05`（增加 5%），其他型号默认 1.0。
-该值是针对下坠反馈的初始调整，未经当前末端负载标定；若出现上飘或某些姿态反向漂移，应减小倍率并检查 URDF 的负载质量/质心。
+主臂默认增加 15% 重力补偿，从臂保留模型原补偿量。若出现上飘或某些姿态反向漂移，应减小倍率并检查 URDF 的负载质量/质心。
 这个倍率在创建从臂控制器前应用，影响从臂整个运行周期的重力补偿，不改动主臂和原始 URDF；倍率和实际重力向量写入 episode 元数据。
-可以显式恢复原补偿量：`--follower-gravity-scale 1.0`。负载模型不准时，单一倍率不保证所有姿态都无漂移。
+可以显式恢复主臂原补偿量：`--leader-gravity-scale 1.0`。负载模型不准时，单一倍率不保证所有姿态都无漂移。
 
 ## 相机与频率
 
@@ -133,7 +131,11 @@ python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --leader-gravity-s
 | `--home-seconds` | 3 | 双臂同步回零目标总秒数，含增益过渡和末段 |
 | `--home-speed` | 1.5 | 回零规划关节速度上限 rad/s，远距离自动延长时间 |
 | `--follower-idle-kd-scale` | 0.5 | 从臂待机阻尼 / SDK 默认 kd |
-| `--follower-gravity-scale` | X5_umi: 1.05；其他: 1.0 | 从臂重力补偿倍率 |
+| `--leader-gravity-scale` | 1.15 | 主臂重力补偿倍率 |
+| `--follower-gravity-scale` | 1.0 | 从臂重力补偿倍率 |
+| `-g` | -3.2969 | 主臂夹爪全开电机角度 |
+| `--follower-gripper-open-readout` | -3.45369 | 从臂夹爪全开电机角度 |
+| `--gripper-close-threshold` | 0.001 m | 主臂闭合归零阈值 |
 
 未来接上主视角相机后，只需添加参数：
 

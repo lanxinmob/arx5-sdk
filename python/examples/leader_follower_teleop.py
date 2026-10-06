@@ -61,9 +61,9 @@ class LeaderFollowerTeleop:
         vel_ratio: float,
         force_scale: float,
         follower_gravity_scale: float = 1.0,
-        leader_gravity_scale: float = 1.0,
-        follower_gripper_open_readout: float = None,
-        gripper_close_threshold: float = 0.0,
+        leader_gravity_scale: float = 1.15,
+        follower_gripper_open_readout: float = -3.45369,
+        gripper_close_threshold: float = 0.001,
         follower_gripper_kp: float = None,
     ):
         assert leader_interface != follower_interface
@@ -284,7 +284,7 @@ class LeaderFollowerTeleop:
 @click.option(
     "--gripper-open-readout",
     "-g",
-    default=-3.4,
+    default=-3.2969,
     help="Fully-open gripper motor readout. Use 0 to keep the default config. "
     "Calibrate with examples/calibrate.py (a common value is -3.4 for newer X5 arms).",
 )
@@ -313,10 +313,10 @@ class LeaderFollowerTeleop:
     "direction.",
 )
 @click.option("--diagnostics", is_flag=True, help="Print actual gains, output torque and fault state once per second")
-@click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Leader gravity compensation multiplier")
+@click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.15, show_default=True, help="Leader gravity compensation multiplier")
 @click.option("--follower-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Follower gravity compensation multiplier")
-@click.option("--follower-gripper-open-readout", type=float, default=None, help="Override the follower's fully-open motor readout; 0 uses its model default")
-@click.option("--gripper-close-threshold", type=click.FloatRange(min=0.0, max=0.005), default=0.0, help="Command fully closed below this leader width (m)")
+@click.option("--follower-gripper-open-readout", type=float, default=-3.45369, show_default=True, help="Override the follower's fully-open motor readout; 0 uses its model default")
+@click.option("--gripper-close-threshold", type=click.FloatRange(min=0.0, max=0.005), default=0.001, show_default=True, help="Command fully closed below this leader width (m)")
 @click.option("--follower-gripper-kp", type=click.FloatRange(min=0.0, min_open=True, max=10.0), default=None, help="Follower gripper position gain override (up to 10)")
 def main(
     leader_model: str,

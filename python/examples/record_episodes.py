@@ -227,11 +227,11 @@ def parse_args():
     parser.add_argument("--home-seconds", type=positive, default=3, help="Target duration for simultaneous homing, including gain ramp and approach")
     parser.add_argument("--home-speed", type=positive, default=1.5, help="Maximum planned homing joint speed (rad/s); long moves extend duration")
     parser.add_argument("--follower-idle-kd-scale", type=positive, default=0.5, help="Follower idle damping as a fraction of SDK default kd")
-    parser.add_argument("--follower-gravity-scale", type=positive, default=None, help="Follower gravity multiplier; default 1.05 for X5_umi, otherwise 1.0")
-    parser.add_argument("--leader-gravity-scale", type=positive, default=1.0, help="Leader gravity multiplier (default 1.0)")
-    parser.add_argument("--gripper-open-readout", "-g", type=float, default=-3.4)
-    parser.add_argument("--follower-gripper-open-readout", type=float, default=None, help="Override follower fully-open motor readout; 0 uses its model default")
-    parser.add_argument("--gripper-close-threshold", type=float, default=0.0, help="Command fully closed below this leader width (m, 0 to 0.005)")
+    parser.add_argument("--follower-gravity-scale", type=positive, default=1.0, help="Follower gravity multiplier")
+    parser.add_argument("--leader-gravity-scale", type=positive, default=1.15, help="Leader gravity multiplier")
+    parser.add_argument("--gripper-open-readout", "-g", type=float, default=-3.2969)
+    parser.add_argument("--follower-gripper-open-readout", type=float, default=-3.45369, help="Override follower fully-open motor readout; 0 uses its model default")
+    parser.add_argument("--gripper-close-threshold", type=float, default=0.001, help="Command fully closed below this leader width (m, 0 to 0.005)")
     parser.add_argument("--follower-gripper-kp", type=positive, default=None, help="Follower gripper position gain override (up to 10)")
     parser.add_argument("--leader-kp", type=float, default=0.0)
     parser.add_argument("--leader-kd-scale", type=float, default=0.05)
@@ -263,8 +263,6 @@ def parse_args():
     args.dataset_dir = args.dataset_dir.expanduser().resolve()
     if args.preview is None:
         args.preview = not args.simulate
-    if args.follower_gravity_scale is None:
-        args.follower_gravity_scale = 1.05 if args.follower_model == "X5_umi" else 1.0
     return args
 
 
