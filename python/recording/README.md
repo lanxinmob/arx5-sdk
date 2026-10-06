@@ -17,7 +17,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 当前只有一台腕部相机，默认使用 Vin 1 的设备路径 `/dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0`（当前为 `/dev/video0`），记录为 `cam_wrist`；默认不开启主视角相机。
 2026-10-06 单腕部相机检查通过，实测接收约 59.8 FPS。Vin 2/3/4 返回固定像素值 7 的无信号灰画面，不作为采集视角。
 启动时先检查相机连续出帧，再让两臂同时回到 home，然后**两臂均进入重力补偿拖动模式**，可分别用手调整位置。
-当前 X5/can1 主臂与 X5_umi/can0 从臂的遥操和采集默认值：主臂重力倍率 1.15、从臂 1.0；主臂 `-g -3.2969`、从臂 `--follower-gripper-open-readout -3.45369`；闭合阈值 `--gripper-close-threshold 0.001`。直接运行上面的命令即可使用，参数仍可显式覆盖。夹爪 kp 保持 SDK 默认 5；剩余小缝隙和闭合重复性尚未完全解决。更换机械臂后应重新标定。
+当前 X5/can1 主臂与 X5_umi/can0 从臂的遥操和采集默认值：主臂重力倍率 1.2、从臂 1.0；主臂 `-g -3.2969`、从臂 `--follower-gripper-open-readout -3.45369`；闭合阈值 `--gripper-close-threshold 0.001`。直接运行上面的命令即可使用，参数仍可显式覆盖。夹爪 kp 保持 SDK 默认 5；剩余小缝隙和闭合重复性尚未完全解决。更换机械臂后应重新标定。
 若拖动模式明显下坠，可添加 `--diagnostics`，每秒输出两臂实际重力补偿开关、故障状态、kp/kd、SDK 输出力矩及实测关节速度。启动时会打印加载的 SDK 路径；输出力矩是 SDK 命令，不代表电机实际产生了同等力矩。
 夹爪无法闭合时，同一输出中的 `gripper_mm` 是测量开度，`gripper_cmd_mm` 是 SDK 输出目标开度（单位 mm），同时显示夹爪实测力矩和 kp。请在空载闭合时比较两臂读数，确定是否需要零点标定；不要用开度偏移掩盖尚未确认的接触保持或机械阻力。
 
@@ -96,7 +96,7 @@ recorder 不再主动调用 `set_to_damping()`。**SDK 原有析构行为仍会�
 
 ## X5_umi 下坠调整
 
-两臂补偿倍率分别通过 `--leader-gravity-scale`（默认 1.15）和 `--follower-gravity-scale`（默认 1.0）设置。
+两臂补偿倍率分别通过 `--leader-gravity-scale`（默认 1.2）和 `--follower-gravity-scale`（默认 1.0）设置。
 当前倍率按实机拖动反馈选定，遥操和采集保持一致。例如在 `python` 目录运行：
 
 ```bash
@@ -108,7 +108,7 @@ python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --diagnostics
 从臂重力补偿已显式开启；待机保持 `kp=0`，不通过锁定位置来实现拖动模式。
 从臂待机阻尼改为独立参数 `--follower-idle-kd-scale 0.5`，不再跟随主臂的 0.05 倍阻尼。
 阻尼可以降低漂移速度，但无法在静止时补足重力模型误差。
-主臂默认增加 15% 重力补偿，从臂保留模型原补偿量。若出现上飘或某些姿态反向漂移，应减小倍率并检查 URDF 的负载质量/质心。
+主臂默认增加 20% 重力补偿，从臂保留模型原补偿量。若出现上飘或某些姿态反向漂移，应减小倍率并检查 URDF 的负载质量/质心。
 这个倍率在创建从臂控制器前应用，影响从臂整个运行周期的重力补偿，不改动主臂和原始 URDF；倍率和实际重力向量写入 episode 元数据。
 可以显式恢复主臂原补偿量：`--leader-gravity-scale 1.0`。负载模型不准时，单一倍率不保证所有姿态都无漂移。
 
@@ -131,7 +131,7 @@ python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --diagnostics
 | `--home-seconds` | 3 | 双臂同步回零目标总秒数，含增益过渡和末段 |
 | `--home-speed` | 1.5 | 回零规划关节速度上限 rad/s，远距离自动延长时间 |
 | `--follower-idle-kd-scale` | 0.5 | 从臂待机阻尼 / SDK 默认 kd |
-| `--leader-gravity-scale` | 1.15 | 主臂重力补偿倍率 |
+| `--leader-gravity-scale` | 1.2 | 主臂重力补偿倍率 |
 | `--follower-gravity-scale` | 1.0 | 从臂重力补偿倍率 |
 | `-g` | -3.2969 | 主臂夹爪全开电机角度 |
 | `--follower-gripper-open-readout` | -3.45369 | 从臂夹爪全开电机角度 |

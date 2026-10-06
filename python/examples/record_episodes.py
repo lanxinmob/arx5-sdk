@@ -228,7 +228,7 @@ def parse_args():
     parser.add_argument("--home-speed", type=positive, default=1.5, help="Maximum planned homing joint speed (rad/s); long moves extend duration")
     parser.add_argument("--follower-idle-kd-scale", type=positive, default=0.5, help="Follower idle damping as a fraction of SDK default kd")
     parser.add_argument("--follower-gravity-scale", type=positive, default=1.0, help="Follower gravity multiplier")
-    parser.add_argument("--leader-gravity-scale", type=positive, default=1.15, help="Leader gravity multiplier")
+    parser.add_argument("--leader-gravity-scale", type=positive, default=1.2, help="Leader gravity multiplier")
     parser.add_argument("--gripper-open-readout", "-g", type=float, default=-3.2969)
     parser.add_argument("--follower-gripper-open-readout", type=float, default=-3.45369, help="Override follower fully-open motor readout; 0 uses its model default")
     parser.add_argument("--gripper-close-threshold", type=float, default=0.001, help="Command fully closed below this leader width (m, 0 to 0.005)")

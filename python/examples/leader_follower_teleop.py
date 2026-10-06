@@ -61,7 +61,7 @@ class LeaderFollowerTeleop:
         vel_ratio: float,
         force_scale: float,
         follower_gravity_scale: float = 1.0,
-        leader_gravity_scale: float = 1.15,
+        leader_gravity_scale: float = 1.2,
         follower_gripper_open_readout: float = -3.45369,
         gripper_close_threshold: float = 0.001,
         follower_gripper_kp: float = None,
@@ -313,7 +313,7 @@ class LeaderFollowerTeleop:
     "direction.",
 )
 @click.option("--diagnostics", is_flag=True, help="Print actual gains, output torque and fault state once per second")
-@click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.15, show_default=True, help="Leader gravity compensation multiplier")
+@click.option("--leader-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.2, show_default=True, help="Leader gravity compensation multiplier")
 @click.option("--follower-gravity-scale", type=click.FloatRange(min=0.0, min_open=True), default=1.0, show_default=True, help="Follower gravity compensation multiplier")
 @click.option("--follower-gripper-open-readout", type=float, default=-3.45369, show_default=True, help="Override the follower's fully-open motor readout; 0 uses its model default")
 @click.option("--gripper-close-threshold", type=click.FloatRange(min=0.0, max=0.005), default=0.001, show_default=True, help="Command fully closed below this leader width (m)")
