@@ -14,8 +14,8 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 ```
 
 不要同时运行原来的 teleop 脚本；recorder 自身驱动主从控制。
-腕部相机默认使用 Vin 3 的设备路径 `/dev/v4l/by-id/usb-MACROSILICON_Vin_3_20250813-video-index0`（当前为 `/dev/video4`）；俯视相机默认使用 Vin 1（当前为 `/dev/video0`）。
-2026-09-30 实测 Vin 1 为有效桌面俯视画面，约 60 FPS；Vin 2/3/4 虽能打开并报告 60 FPS，图像却固定为像素值 7 的灰画面。腕部相机信号恢复并通过下方检查前，不要开始采集。旧路径中的 `20250803` 序号已不存在。
+当前只有一台腕部相机，默认使用 Vin 1 的设备路径 `/dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0`（当前为 `/dev/video0`），记录为 `cam_wrist`；默认不开启主视角相机。
+2026-10-06 单腕部相机检查通过，实测接收约 59.8 FPS。Vin 2/3/4 返回固定像素值 7 的无信号灰画面，不作为采集视角。
 启动时先检查相机连续出帧，再让两臂同时回到 home，然后**两臂均进入重力补偿拖动模式**，可分别用手调整位置。
 参数 `-g` 默认 `-3.4`，沿用当前示例；应使用已标定的夹爪值。
 
@@ -56,11 +56,11 @@ python examples/record_episodes.py --check-cameras
 
 ```bash
 python examples/record_episodes.py --check-cameras \
-  --wrist-camera /dev/v4l/by-id/usb-MACROSILICON_Vin_3_20250813-video-index0 \
+  --wrist-camera /dev/v4l/by-id/usb-MACROSILICON_Vin_1_20250811-video-index0 \
   --fourcc MJPG --width 1920 --height 1080 --camera-fps 60
 ```
 
-正常采集默认请求 1920×1080 / 相机 30 FPS，再变换保存为 256×256；`--fps` 独立控制数据记录频率。
+正常采集默认请求 1920×1080 / 相机 60 FPS，再变换保存为 256×256；`--fps` 控制数据记录频率，相机时钟模式下须与 `--camera-fps` 相同。
 ffplay 与 recorder 不应同时占用同一个采集节点。
 
 若设备能打开但 5 秒内没有图像，检查相机/采集卡输入信号和设备节点；设备支持时也可测试 `--fourcc YUYV`。
