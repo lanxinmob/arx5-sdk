@@ -1,5 +1,62 @@
 # C++ && Python Controller for ARX5 Robot Arm
 
+## SpaceMouse Through the Joint ZMQ Server
+
+Use the `arx5` environment and local SDK build. For the connected 3Dconnexion
+Universal Receiver, the input driver is `spacenavd`; official Linux 3DxWare 1.8.0
+does not support this receiver. Start the input driver once:
+
+```bash
+sudo systemctl start spacenavd
+```
+
+In terminal 1, start the right-arm server. Only one controller may use `can0`:
+
+```bash
+conda activate arx5
+cd /home/hjadmin/projects/arx5-sdk/python
+python communication/zmq_joint_server.py X5_umi can0
+```
+
+In terminal 2, connect the mouse to that server:
+
+```bash
+conda activate arx5
+cd /home/hjadmin/projects/arx5-sdk/python
+python communication/spacemouse_joint_bridge.py
+```
+
+The client starts connected but disarmed. With the mouse cap released, hold
+both buttons for one second to move the arm to SDK home and enable jogging.
+Keep the homing path clear. Release both buttons before controlling the arm.
+Push/pull and rotate the cap to jog the end effector in the robot base frame;
+the axis mapping matches the SDK's SpaceMouse example. Button 0 opens the
+gripper; button 1 closes it. Press both buttons again, or Ctrl+C in the client,
+to request damping and stop the client. This does not power off the motors.
+The blocking server homing call must finish before it can handle a stop request.
+
+Default speed limits are 0.04 m/s translation, 0.3 rad/s rotation,
+0.3 rad/s per joint and 0.02 m/s gripper motion. Use `--translation-speed`,
+`--rotation-speed`, `--joint-speed` and `--gripper-speed` to adjust them.
+The client uses SDK inverse kinematics, checks the server model, bounds targets
+by SDK joint limits, holds at unreachable IK targets and rejects excessive
+tracking error. Released/stale mouse input holds the last position. Device
+loss or a control error requests damping. If communication prevents that
+request, the existing server's two-second timeout may return the arm to home.
+Only one teleoperation client should control the server.
+
+To read the mouse and solve IK for ten seconds without connecting to the arm:
+
+```bash
+python communication/spacemouse_joint_bridge.py --dry-run
+```
+
+To check the mouse and server model with only `GET_STATE` requests:
+
+```bash
+python communication/spacemouse_joint_bridge.py --check
+```
+
 ## Quest Dual-Arm Teleoperation
 
 On this machine, the right arm is `X5_umi/can0` and the left arm is `X5/can1`.
