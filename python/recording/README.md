@@ -1,5 +1,7 @@
 # ARX5 主从 HDF5 采集
 
+完整环境配置、设备映射与其他控制入口见 [真机操作索引](../../docs/hardware/README.md)。
+
 一台主臂用于示教、一台从臂执行任务，记录的是**单执行臂**数据。
 复用 `examples/leader_follower_teleop.py` 的限位、速度前馈及夹爪力反馈逻辑。
 
@@ -236,10 +238,10 @@ python examples/record_episodes.py --simulate \
   --dataset-dir /tmp/arx5-recorder-smoke \
   --instruction '把红色方块放进碗里' --auto-start \
   --episodes 2 --episode-seconds 2 --result-on-timeout success
-python -m unittest discover -s tests -p 'test_hdf5_recorder.py' -v
 ```
 
 模拟模式不导入机器人接口、不打开 CAN/相机，生成带 `sim=True` 的 HDF5。
+检查生成文件的 `complete/status/sim`、样本数、图像形状和动作字段后删除本次临时测试目录；当前仓库不保留 `tests/`，不要运行不存在的 unittest 路径。
 模拟模式默认不打开桌面窗口；加 `--preview` 可测试窗口，例如：
 
 ```bash

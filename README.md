@@ -1,5 +1,12 @@
 # C++ && Python Controller for ARX5 Robot Arm
 
+## 真机文档与 Agent 索引
+
+从 [真机操作索引](docs/hardware/README.md) 开始，按顺序完成环境配置、设备核对、标定和控制入口选择。
+其中包含 [本机配置快照](docs/hardware/current-machine.md)、[新机器配置](docs/hardware/setup.md)、
+[日常操作](docs/hardware/operations.md)、[其他策略模型接入](docs/hardware/model-integration.md) 和
+[故障排查](docs/hardware/troubleshooting.md)。命令区分无硬件检查与会驱动电机的操作；本机参数不能作为所有机械臂的默认标定。
+
 ## SpaceMouse Through the Joint ZMQ Server
 
 Use the `arx5` environment and local SDK build. For the connected 3Dconnexion
@@ -64,6 +71,13 @@ The Quest app sends both controller streams to `192.168.31.137:10000` over
 Wi-Fi. The two commands below are the complete host-side workflow; do not run
 another controller on either CAN interface or another receiver on port 10000.
 Use the local `arx5` environment and the locally built `arx5_interface` module.
+
+Before using these commands, check the [current calibration overrides](docs/hardware/current-machine.md#calibration-overrides).
+The joint server currently applies one hardcoded gripper readout to both arms;
+it does not automatically use the per-arm leader/follower calibration.
+The preview layout below is a configured layout, not evidence of live camera
+signals. The [2026-10-12 check](docs/hardware/current-machine.md#devices) found
+no valid video input on either Vin 1 or Vin 4.
 
 In terminal 1, start the joint servers:
 
