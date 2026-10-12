@@ -5,7 +5,7 @@ import sys
 import numpy as np
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 from arx5_interface import (
     Arx5CartesianController,
@@ -159,9 +159,17 @@ def start_teleop_recording(controller: Arx5CartesianController):
 @click.command()
 @click.argument("model")  # ARX arm model: X5 or L5
 @click.argument("interface")  # can bus name (can0 etc.)
-def main(model: str, interface: str):
+@click.option(
+    "--gripper-open-readout", "-g", type=float, default=0.0, show_default=True,
+    help="Fully-open gripper motor angle; 0 uses the model default.",
+)
+def main(model: str, interface: str, gripper_open_readout: float):
 
+    if not np.isfinite(gripper_open_readout):
+        raise click.BadParameter("Must be finite", param_hint="--gripper-open-readout")
     robot_config = RobotConfigFactory.get_instance().get_config(model)
+    if gripper_open_readout != 0.0:
+        robot_config.gripper_open_readout = gripper_open_readout
     controller_config = ControllerConfigFactory.get_instance().get_config(
         "cartesian_controller", robot_config.joint_dof
     )

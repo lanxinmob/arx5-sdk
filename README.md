@@ -345,6 +345,22 @@ sudo systemctl enable spacenavd.service
 sudo systemctl start spacenavd.service
 ```
 
+For direct SpaceMouse control on this machine, stop other controllers on the
+chosen CAN interface, activate `arx5`, and run from the `python` directory:
+
+```bash
+python examples/spacemouse_teleop.py X5_umi can0 --gripper-open-readout -3.45369
+# Left arm:
+python examples/spacemouse_teleop.py X5 can1 --gripper-open-readout -3.2969
+```
+
+The script uses the local SDK first and applies the gripper calibration before
+creating the controller. These readouts are specific to the current arms;
+use `examples/calibrate.py` after changing hardware. Startup immediately moves
+the arm to home, so keep its path clear. A negative measured gripper opening
+can indicate an incorrect motor-angle sign; resolve the configuration before
+restarting after an SDK emergency.
+
 ## Test scripts
 
 Arguments for `test_joint_control.py`, `keyboard_teleop.py`, `spacemouse_teleop.py` and `teach_replay.py`: 
