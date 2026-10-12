@@ -46,7 +46,7 @@ python examples/spacemouse_teleop.py X5 can1 --gripper-open-readout -3.2969
 
 SDK 报 `Inverse kinematics rejected: ...`（目标不可达或关节超限）时，直连版保持最后接受的目标，不退出、不累计被拒绝的位姿或夹爪增量；反向操作至目标可达后自动恢复。首次拒绝显示原始错误，连续拒绝不重复提示；其他异常继续向外抛出，SDK emergency 保护仍生效。保持的是命令目标，不代表实测已到位。
 
-直连版的 `target_gripper_pos` 初始为 0，双按钮回零后也重置为 0；因此回零虽张开夹爪，开始/恢复遥操时会从闭合目标开始。平移 0.1 m/s 是各轴输入的速度系数，未按三维平移范数限速，不能作为合成速度上限。
+直连版的 `target_gripper_pos` 初始为机型的 `gripper_width`（全开），双按钮回零后也重置为全开；开始/恢复遥操时保持全开目标，按钮 1 才逐步闭合。平移 0.1 m/s 是各轴输入的速度系数，未按三维平移范数限速，不能作为合成速度上限。
 
 <a id="quest"></a>
 ## Quest 双臂
@@ -158,7 +158,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | SDK controller | 构造即收发电机，初始 kp=0/阻尼增益；可能有重力输出 | 没有应用层 watchdog，后台继续最后插值/输出 | 默认析构关闭重力并约 2 s 阻尼；非断电 |
 | joint ZMQ | 启动 disarmed；`RESET_TO_HOME` 全开夹爪并 armed | armed 后默认 2 s 无接受关节目标，尝试两段慢回零保持夹爪，再 disarm/阻尼 | server 停止同样尝试慢回零；`SET_TO_DAMPING` 直接 disarm |
 | guarded Cartesian ZMQ | disarmed；reset 后用 SDK reset 命令位姿 arm | 默认 2 s 无接受末端目标，阻尼/disarm；不回零 | Ctrl+C close 请求阻尼；SIGTERM 无自定义 handler，不当成同等恢复路径 |
-| SpaceMouse 直连 | 启动立即 reset；双钮再次 reset | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
+| SpaceMouse 直连 | 启动立即 reset；双钮再次 reset；夹爪目标均全开 | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
 | Quest bridge | 两手流到达后双臂 reset | stale hold 后 packet loss 停止，reset 阶段例外 | 健康 armed 臂慢回零保持夹爪，再阻尼 |
 | 主从 teleop | 主从依次 reset，space 跟随 | 暂停从臂位置保持，主臂拖动 | q/Ctrl+C 尝试回零，异常恢复不等同 recorder |
 | recorder | 相机/预览验证后同步 reset | 待机两臂拖动；每轮结束不自动 home | 信号/故障等尝试同步慢回零全开夹爪，然后 SDK 析构 |

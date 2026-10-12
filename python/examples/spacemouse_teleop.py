@@ -33,7 +33,8 @@ def start_teleop_recording(controller: Arx5CartesianController):
     deadzone_threshold = 0.1
     target_pose_6d = controller.get_home_pose()
 
-    target_gripper_pos = 0.0
+    robot_config = controller.get_robot_config()
+    target_gripper_pos = robot_config.gripper_width
 
     window_size = 3
     cmd_dt = 0.01
@@ -45,7 +46,6 @@ def start_teleop_recording(controller: Arx5CartesianController):
 
     pose_x_min = target_pose_6d[0]
     spacemouse_queue = Queue(window_size)
-    robot_config = controller.get_robot_config()
 
     avg_error = np.zeros(6)
     avg_cnt = 0
@@ -108,9 +108,9 @@ def start_teleop_recording(controller: Arx5CartesianController):
                     # Traj without vel Avg 6D pose error:   [ 0.0005  0.0008 -0.005  -0.0024  0.0073 -0.0001]
 
                     controller.reset_to_home()
-                    config = controller.get_robot_config()
+                    robot_config = controller.get_robot_config()
                     target_pose_6d = controller.get_home_pose()
-                    target_gripper_pos = 0.0
+                    target_gripper_pos = robot_config.gripper_width
                     holding_at_limit = False
                     loop_cnt = 0
                     start_time = time.monotonic()
