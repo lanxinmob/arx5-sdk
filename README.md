@@ -377,6 +377,10 @@ the arm to home, so keep its path clear. A negative measured gripper opening
 can indicate an incorrect motor-angle sign; resolve the configuration before
 restarting after an SDK emergency.
 
+If a target exceeds joint limits or is unreachable, direct SpaceMouse control
+keeps the last valid target without exiting or accumulating rejected input.
+Move the mouse back toward reachable poses to resume tracking.
+
 ## Test scripts
 
 Arguments for `test_joint_control.py`, `keyboard_teleop.py`, `spacemouse_teleop.py` and `teach_replay.py`: 

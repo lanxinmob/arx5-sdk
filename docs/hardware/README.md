@@ -30,7 +30,7 @@
 | 本机序列号、can0/can1、左右臂、Vin | [当前机器](current-machine.md#devices) | 系统 udev/service + 已有 README 记录 |
 | 模型名、DOF、电机 ID、URDF、重力、增益 | [机型配置](setup.md#robot-config) | [配置工厂](../../include/app/config.h)、[绑定与类型](../../python/arx5_interface.pyi) |
 | 夹爪符号、全开角度、闭合零点、verify-zero | [标定](setup.md#calibration) | [标定入口](../../python/examples/calibrate.py)、[标定实现](../../src/app/joint_controller.cpp) |
-| SpaceMouse、spacenavd、双按钮 | [鼠标遥操](operations.md#spacemouse) | [ZMQ bridge](../../python/communication/spacemouse_joint_bridge.py)、[直连示例](../../python/examples/spacemouse_teleop.py) |
+| SpaceMouse、spacenavd、双按钮、限位保持 | [鼠标遥操](operations.md#spacemouse) | [ZMQ bridge](../../python/communication/spacemouse_joint_bridge.py)、[直连示例](../../python/examples/spacemouse_teleop.py) |
 | Quest、10000、PosCmd、A/X、reset marker | [Quest 遥操](operations.md#quest) | [VR bridge](../../python/communication/vr_joint_bridge.py)、[解码器](../../python/communication/vr_receiver.py) |
 | 主从、拖动、重力倍率、力反馈 | [主从与拖动](operations.md#leader-follower) | [主从入口](../../python/examples/leader_follower_teleop.py)、[拖动入口](../../python/examples/drag_mode.py) |
 | HDF5、record、RGB、频率、训练格式 | [采集流程](operations.md#recording) | [完整采集手册](../../python/recording/README.md)、[录制入口](../../python/examples/record_episodes.py) |
@@ -71,6 +71,8 @@ checkpoint 路径与版本 / normalization key / 观测与动作形状:
 维护规则：新增控制入口时同步索引、标定覆盖表和退出矩阵；更换相机/夹爪/工具后重新核对快照及动作合同。测试产物用临时目录，验证完删除，不在仓库新增永久 test 文件。
 
 ## 本次文档验证
+
+2026-10-12 SpaceMouse 直连限位保持更新：无硬件替身验证轨迹/单点两模式下的连续 IK 拒绝、位姿与夹爪增量不累积、反向恢复、双按钮回零重置及其他 RuntimeError 继续抛出；脚本语法与 `--help` 通过，临时测试文件已清理。未构造 SDK controller，未验证真机保持或实测到位。
 
 2026-10-12 无电机操作核验：所有本组文档的相对文件链接/显式锚点和 Python 示例语法通过，setup 的离线 SDK 检查实际执行通过；7 个关键入口 `--help` 的文档参数存在；8 个工厂机型离线 FK/IK/逆动力学通过。模拟采集两轮，验证 `sim=True`、`complete=True`、`status=saved`、成功标签、7 维 action、256x256 RGB uint8、相机序号推进及样本数，临时目录已删除。
 

@@ -74,7 +74,7 @@ python -B examples/record_episodes.py --check-cameras --no-preview \
 | --- | --- | --- |
 | `RobotConfigFactory` | X5/X5_umi 全开读数 `-3.25952`；宽度分别 `0.088/0.086 m` | Python 构造前赋值，或修改工厂并重编译 |
 | `leader_follower_teleop.py`、`record_episodes.py` | 主臂 `-3.2969`，从臂 `-3.45369`；主重力倍率 1.2、从 1.0 | `-g`、`--follower-gripper-open-readout`、两臂 gravity-scale；0 读数表示用机型默认值 |
-| `spacemouse_teleop.py` 直连 | 全开读数默认 0，表示保留机型默认值 | 本机右臂显式 `--gripper-open-readout -3.45369`，左臂 `-3.2969` |
+| `spacemouse_teleop.py` 直连 | 全开读数默认 0，表示保留机型默认值；IK 拒绝时保持最后有效目标 | 本机右臂显式 `--gripper-open-readout -3.45369`，左臂 `-3.2969`；限位保持不改变构造前标定 |
 | `zmq_joint_server.py` | 所有机型硬编码 `-3.37472` | 修改 `serve()` 中构造前赋值，双臂时按 model/interface 分配；当前没有标定 CLI |
 | `zmq_server_agent_safe.py` | 所有机型硬编码 `-3.37472` | 修改构造中的 `robot_config` 赋值；另设 `--gripper-max` 匹配宽度 |
 | `zmq_server.py` 旧服务 | 首次构造硬编码 `-3.37472`；超时后重建走机型简写构造，可能恢复工厂值 | 接新模型优先采用 documented joint/guarded 入口；旧服务要核对重建路径 |

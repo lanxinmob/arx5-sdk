@@ -51,6 +51,7 @@ def start_teleop_recording(controller: Arx5CartesianController):
     avg_cnt = 0
     prev_eef_cmd = EEFState()
     eef_cmd = EEFState()
+    holding_at_limit = False
 
     with SharedMemoryManager() as shm_manager:
         with Spacemouse(
@@ -110,6 +111,7 @@ def start_teleop_recording(controller: Arx5CartesianController):
                     config = controller.get_robot_config()
                     target_pose_6d = controller.get_home_pose()
                     target_gripper_pos = 0.0
+                    holding_at_limit = False
                     loop_cnt = 0
                     start_time = time.monotonic()
 
@@ -121,13 +123,13 @@ def start_teleop_recording(controller: Arx5CartesianController):
                 else:
                     gripper_cmd = 0
                 # print(state, target_gripper_pos)
-                target_pose_6d[:3] += state[:3] * pos_speed * cmd_dt
-                target_pose_6d[3:] += state[3:] * ori_speed * cmd_dt
-                target_gripper_pos += gripper_cmd * gripper_speed * cmd_dt
-                if target_gripper_pos >= robot_config.gripper_width:
-                    target_gripper_pos = robot_config.gripper_width
-                elif target_gripper_pos <= 0:
-                    target_gripper_pos = 0
+                candidate_pose_6d = target_pose_6d.copy()
+                candidate_pose_6d[:3] += state[:3] * pos_speed * cmd_dt
+                candidate_pose_6d[3:] += state[3:] * ori_speed * cmd_dt
+                candidate_gripper_pos = np.clip(
+                    target_gripper_pos + gripper_cmd * gripper_speed * cmd_dt,
+                    0.0, robot_config.gripper_width,
+                )
                 loop_cnt += 1
                 while time.monotonic() < start_time + loop_cnt * cmd_dt:
                     pass
@@ -135,18 +137,30 @@ def start_teleop_recording(controller: Arx5CartesianController):
                 prev_eef_cmd = eef_cmd
                 # if target_pose_6d[0] < pose_x_min:
                 #     target_pose_6d[0] = pose_x_min
-                eef_cmd.pose_6d()[:] = target_pose_6d
-                eef_cmd.gripper_pos = target_gripper_pos
+                eef_cmd.pose_6d()[:] = candidate_pose_6d
+                eef_cmd.gripper_pos = candidate_gripper_pos
                 eef_cmd.timestamp = current_timestamp + preview_time
 
-                if UPDATE_TRAJ:
-                    # This will calculate the velocity automatically
-                    controller.set_eef_traj([eef_cmd])
-
-                # Or sending single eef_cmd:
+                try:
+                    if UPDATE_TRAJ:
+                        # This will calculate the velocity automatically
+                        controller.set_eef_traj([eef_cmd])
+                    else:
+                        # Only position control
+                        controller.set_eef_cmd(eef_cmd)
+                except RuntimeError as exc:
+                    if not str(exc).startswith("Inverse kinematics rejected: "):
+                        raise
+                    # The SDK keeps its previous trajectory when IK rejects a target.
+                    if not holding_at_limit:
+                        print(f"\n{exc}. Holding the last valid target.")
+                    holding_at_limit = True
                 else:
-                    # Only position control
-                    controller.set_eef_cmd(eef_cmd)
+                    target_pose_6d = candidate_pose_6d
+                    target_gripper_pos = candidate_gripper_pos
+                    if holding_at_limit:
+                        print("\nTarget reachable again. Resuming tracking.")
+                    holding_at_limit = False
 
                 output_eef_cmd = controller.get_eef_cmd()
                 eef_state = controller.get_eef_state()
