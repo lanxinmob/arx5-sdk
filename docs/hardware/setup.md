@@ -17,7 +17,7 @@ conda activate arx5
 conda install -c conda-forge 'eigen>=3.3,<4'
 ```
 
-默认 YAML 的 eigen 未锁 major，而预编译 `libsolver.so` 需要 Eigen 3.x；CMake 已阻止 Eigen 4。SpaceMouse bridge/Quest 使用 SciPy，采集/预览使用 OpenCV：
+默认 YAML 的 eigen 未锁 major，而预编译 `libsolver.so` 需要 Eigen 3.x；CMake 已阻止 Eigen 4。Quest 使用 SciPy，采集/预览使用 OpenCV：
 
 ```bash
 python -m pip install 'scipy<1.14'
@@ -203,10 +203,10 @@ sudo apt install libspnav-dev spacenavd
 sudo systemctl enable spacenavd
 sudo systemctl start spacenavd
 cd python
-python -B communication/spacemouse_joint_bridge.py --dry-run --seconds 10
+python -B -c 'import spnav; spnav.spnav_open(); print("SpaceMouse input connected"); spnav.spnav_close()'
 ```
 
-YAML 已包含 Python spnav。dry-run 只读输入并解 IK，不连接机器人；通过条件是鼠标轴/按钮响应且无设备丢失错误。Universal Receiver 在本机使用 spacenavd，其他型号需重新核验驱动。`--check` 则会访问已启动 server 的 GET_STATE，区别于 dry-run。
+YAML 已包含 Python spnav。上述检查只连接输入服务，不连接机器人，也不验证鼠标轴/按钮响应。Universal Receiver 在本机使用 spacenavd，其他型号需重新核验驱动。直连遥操示例没有 dry-run 参数，运行它会初始化电机并回零。
 
 ### V4L2 与 iPhUMI
 

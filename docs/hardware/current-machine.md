@@ -90,4 +90,4 @@ python -B examples/record_episodes.py --check-cameras --no-preview \
 - 历史真机记录：[根 README](../../README.md)、[采集手册](../../python/recording/README.md)。当前夹爪各值还可追溯提交 `2e01969`，主臂重力倍率提交 `e300b7f`，SDK 接触保持提交 `516a9d4`。
 - 这页不记录密钥、账户或模型服务凭据。USB 重插、网段变化、脚本覆盖修改后更新此页，并在实验记录中保留当次实际有效值。
 
-本次离线核验全部 8 个工厂机型：URDF 存在，限位中点 FK -> IK -> FK 位置/旋转误差均小于 `1e-5`，IK status=0，逆动力学输出 finite。SpaceMouse 2 s dry-run 成功打开输入并跑 IK，观察到按钮事件；未验证实物轴方向/跟随。KDL 输出 root-link inertia 不支持的警告，日志显示 `eef_link` 用于运动学、`link6/link7` 用于逆动力学，不能据此假定新增固定工具的质量完整计入重力模型。
+本次离线核验全部 8 个工厂机型：URDF 存在，限位中点 FK -> IK -> FK 位置/旋转误差均小于 `1e-5`，IK status=0，逆动力学输出 finite。现已删除的 SpaceMouse ZMQ bridge 曾在 2 s dry-run 中成功打开输入并跑 IK，观察到按钮事件；未验证实物轴方向/跟随。当前直连示例没有 dry-run 参数。KDL 输出 root-link inertia 不支持的警告，日志显示 `eef_link` 用于运动学、`link6/link7` 用于逆动力学，不能据此假定新增固定工具的质量完整计入重力模型。

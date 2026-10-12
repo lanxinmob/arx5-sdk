@@ -23,7 +23,6 @@ python -B -c 'import arx5_interface as s; print(s.__file__)'
 
 | 需求 | 入口 | 持有 CAN 的进程 |
 | --- | --- | --- |
-| 一臂鼠标，通过现有关节服务 | `zmq_joint_server.py` + `spacemouse_joint_bridge.py` | joint server |
 | 一臂鼠标，直接 SDK | `examples/spacemouse_teleop.py` | 直连示例 |
 | Quest 双臂 | 两路 joint server + `vr_joint_bridge.py` | 两个 server 子进程 |
 | 主从拖动示教 | `examples/leader_follower_teleop.py` | 该进程持有两路 CAN |
@@ -35,31 +34,6 @@ python -B -c 'import arx5_interface as s; print(s.__file__)'
 <a id="spacemouse"></a>
 ## SpaceMouse
 
-### 通过 joint server
-
-先按覆盖表确认 server 的夹爪读数。当前统一 `-3.37472` 并不等于本机主从标定 `-3.45369/-3.2969`；修正脚本构造前配置后再启动。服务端没有标定 CLI。
-
-终端 1：
-
-```bash
-python communication/zmq_joint_server.py X5_umi can0
-```
-
-终端 2（同环境、同目录）：
-
-```bash
-python communication/spacemouse_joint_bridge.py --check
-python communication/spacemouse_joint_bridge.py
-```
-
-`--check` 只 GET_STATE 与 FK 比较，要求 server/客户端模型一致，但已启动 server 本身已初始化电机；server 若已 armed，其自身超时仍可能回零。正常客户端要求服务初始 disarmed。鼠标帽保持中立、双按钮长按 1 秒：回 SDK home 并 arm；回零结束后释放双按钮再操作。平移/旋转在机器人基座系；按钮 0 开、按钮 1 闭。再次双按或 Ctrl+C 请求阻尼并退出，不会主动回零。鼠标 stale 超过 0.25 s 时保持目标，设备掉线/控制失败请求阻尼。
-
-默认更新 50 Hz；平移 0.04 m/s、旋转 0.3 rad/s、每关节 0.3 rad/s、夹爪 0.02 m/s，参数为 `--translation-speed` / `--rotation-speed` / `--joint-speed` / `--gripper-speed`。IK 不可达则保持边界，实测跟随误差大于 0.25 rad 停止。停止请求失败时，joint server 的 2 s 超时会尝试慢回零。因此“客户端退出”可能仍有后续 server 回零运动。
-
-独立外设验证用 `--dry-run --seconds 10`，不连接 server，不触发电机初始化。
-
-### 直接 SDK
-
 停止选定 CAN 的 server/其他 controller 后：
 
 ```bash
@@ -68,7 +42,7 @@ python examples/spacemouse_teleop.py X5_umi can0 --gripper-open-readout -3.45369
 python examples/spacemouse_teleop.py X5 can1 --gripper-open-readout -3.2969
 ```
 
-启动立即回零，不需要双按钮 arm。默认 100 Hz 目标更新、平移 0.1 m/s、旋转 0.3 rad/s、夹爪 0.04 m/s；这些在脚本内，不是 joint bridge 的 CLI。双按钮请求回零并重置遥操目标；Ctrl+C 回零再阻尼。它不具备 joint bridge 相同的外设断流检查/显式 arm 状态；发生未捕获异常时不能假定会回零。此入口使用 shared memory/atomics、spnav。
+启动立即回零，不需要双按钮 arm。默认 100 Hz 目标更新、平移 0.1 m/s、旋转 0.3 rad/s、夹爪 0.04 m/s；这些在脚本内设置。双按钮请求回零并重置遥操目标；Ctrl+C 回零再阻尼。没有外设断流检查/显式 arm 状态；发生未捕获异常时不能假定会回零。此入口使用 shared memory/atomics、spnav。
 
 SDK 报 `Inverse kinematics rejected: ...`（目标不可达或关节超限）时，直连版保持最后接受的目标，不退出、不累计被拒绝的位姿或夹爪增量；反向操作至目标可达后自动恢复。首次拒绝显示原始错误，连续拒绝不重复提示；其他异常继续向外抛出，SDK emergency 保护仍生效。保持的是命令目标，不代表实测已到位。
 
@@ -174,7 +148,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | [C++ joint](../../examples/test_joint_controller.cpp)、[C++ Cartesian](../../examples/test_cartesian_controller.cpp) | 构建出的 executable，无 model/interface CLI | 全局构造硬编码 `L5/can0`；启动即连接，先改配置和现场轨迹；EtherCAT 重编译后重新 setcap |
 | [test_solver.py](../../python/examples/test_solver.py) | 无 CLI，只构造 solver 做 FK/IK/ID | 不连接 CAN，但默认是 X5 示例；新模型用 setup 中配置检查并显式选机型 |
 
-旧实验入口的 hardcoded 值应在构造前改为目标臂的已验证读数；同步确认退出路径，不在已有 server 持有 CAN 时运行。新 agent 的安装冒烟优先采用 setup 的离线配置/solver、相机检查与 SpaceMouse dry-run。
+旧实验入口的 hardcoded 值应在构造前改为目标臂的已验证读数；同步确认退出路径，不在已有 server 持有 CAN 时运行。新 agent 的安装冒烟优先采用 setup 的离线配置/solver、相机检查与 SpaceMouse 输入连接检查。
 
 <a id="lifecycle"></a>
 ## 回零、超时与退出矩阵
@@ -184,7 +158,6 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | SDK controller | 构造即收发电机，初始 kp=0/阻尼增益；可能有重力输出 | 没有应用层 watchdog，后台继续最后插值/输出 | 默认析构关闭重力并约 2 s 阻尼；非断电 |
 | joint ZMQ | 启动 disarmed；`RESET_TO_HOME` 全开夹爪并 armed | armed 后默认 2 s 无接受关节目标，尝试两段慢回零保持夹爪，再 disarm/阻尼 | server 停止同样尝试慢回零；`SET_TO_DAMPING` 直接 disarm |
 | guarded Cartesian ZMQ | disarmed；reset 后用 SDK reset 命令位姿 arm | 默认 2 s 无接受末端目标，阻尼/disarm；不回零 | Ctrl+C close 请求阻尼；SIGTERM 无自定义 handler，不当成同等恢复路径 |
-| SpaceMouse joint bridge | 手动长按双钮才 reset | 释放/stale 保持目标；异常请求阻尼 | 双钮/Ctrl+C 阻尼；失败时 server 超时可回零 |
 | SpaceMouse 直连 | 启动立即 reset；双钮再次 reset | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
 | Quest bridge | 两手流到达后双臂 reset | stale hold 后 packet loss 停止，reset 阶段例外 | 健康 armed 臂慢回零保持夹爪，再阻尼 |
 | 主从 teleop | 主从依次 reset，space 跟随 | 暂停从臂位置保持，主臂拖动 | q/Ctrl+C 尝试回零，异常恢复不等同 recorder |

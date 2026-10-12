@@ -66,7 +66,7 @@ SDK 会检测非 finite 数据、非常异常的关节读数、夹爪范围和�
 
 `Cannot set kp ... far from current pos` 表示 kp 从 0 恢复时旧命令与测量相距 >0.2 rad 且目标 kp>1；先将目标锚定实测、按流程平滑恢复增益，参考 `drag_mode.py::enter_hold` / recorder lifecycle，不能取消这项检查。源码此分支还停止后台收发，不能认为异常捕获后控制器仍正常。
 
-IK 返回 status=0 才成功，同时检查 finite、joint limits 和 FK 误差。unreachable 时保持或减小目标，不能发失败的 IK 返回关节值；六关节回零附近可能有奇异姿态。SpaceMouse 跟随误差 >0.25 rad 会停；Quest 允许实测越界 <=0.1 rad 仅作为 seed 容差，不是扩大目标限位。
+IK 返回 status=0 才成功，同时检查 finite、joint limits 和 FK 误差。unreachable 时保持或减小目标，不能发失败的 IK 返回关节值；六关节回零附近可能有奇异姿态。SpaceMouse 直连示例会输出跟随误差，但没有原 ZMQ bridge 的 0.25 rad 停止阈值；Quest 允许实测越界 <=0.1 rad 仅作为 seed 容差，不是扩大目标限位。
 
 `Arm did not reach home`、`return to home failed` 或 recorder 的 `Home target was sent but measured position did not reach home` 是恢复失败。记录目标与实测、检查 emergency/反馈/阻挡；不能在碰撞路径上重复 home。SDK reset 的打印结束不等于实测到位，参见 [退出矩阵](operations.md#lifecycle)。停止 server 后先确认机械臂有稳定支撑，阻尼和断电都可能使其下坠。
 
