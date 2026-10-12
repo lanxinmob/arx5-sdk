@@ -25,8 +25,8 @@ import click
 
 def start_teleop_recording(controller: Arx5CartesianController):
 
-    ori_speed = 1.5
-    pos_speed = 0.8
+    ori_speed = 0.3
+    pos_speed = 0.1
     gripper_speed = 0.04
     # For earlier spacemouse versions (wired version), the readout might be not zero even after it is released
     # If you are using the wireless 3Dconnexion spacemouse, you can set the deadzone_threshold to 0.0 for better sensitivity
