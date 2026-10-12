@@ -70,6 +70,8 @@ python examples/spacemouse_teleop.py X5 can1 --gripper-open-readout -3.2969
 
 启动立即回零，不需要双按钮 arm。默认 100 Hz 目标更新、平移 0.1 m/s、旋转 0.3 rad/s、夹爪 0.04 m/s；这些在脚本内，不是 joint bridge 的 CLI。双按钮请求回零并重置遥操目标；Ctrl+C 回零再阻尼。它不具备 joint bridge 相同的外设断流检查/显式 arm 状态；发生未捕获异常时不能假定会回零。此入口使用 shared memory/atomics、spnav。
 
+直连版的 `target_gripper_pos` 初始为 0，双按钮回零后也重置为 0；因此回零虽张开夹爪，开始/恢复遥操时会从闭合目标开始。平移 0.1 m/s 是各轴输入的速度系数，未按三维平移范数限速，不能作为合成速度上限。
+
 <a id="quest"></a>
 ## Quest 双臂
 
@@ -101,7 +103,7 @@ Ctrl+C / packet loss / 大偏差停止时向健康 armed server 请求 `RETURN_T
 <a id="preview"></a>
 ## Quest 相机预览与 MP4
 
-bridge 默认启动桌面 4:3 预览：iPhUMI main + 左腕 Vin 4 + 右腕 Vin 1。`--primary-camera ultrawide` 切为 ultrawide；`--right-camera`、`--left-camera` 覆盖 V4L2 路径。本机较新记录仅 Vin 1 有效，必须先核对 Vin 4。相机失败会重连，不中断 Quest 遥操；关窗口也不停止遥操，Ctrl+C bridge 才走机械臂退出流程。无桌面用 `--no-preview`。
+bridge 默认启动桌面 4:3 预览：iPhUMI main + 左腕 Vin 4 + 右腕 Vin 1。`--primary-camera ultrawide` 切为 ultrawide；`--right-camera`、`--left-camera` 覆盖 V4L2 路径。2026-10-12 的检查中 Vin 1/Vin 4 都无有效输入，使用前重新核对相机，见 [本机快照](current-machine.md#devices)。相机失败会重连，不中断 Quest 遥操；关窗口也不停止遥操，Ctrl+C bridge 才走机械臂退出流程。无桌面用 `--no-preview`。
 
 ```bash
 python communication/vr_joint_bridge.py --record-video

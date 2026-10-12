@@ -1,6 +1,7 @@
 # ARX5 主从 HDF5 采集
 
 完整环境配置、设备映射与其他控制入口见 [真机操作索引](../../docs/hardware/README.md)。
+第一次操作请先读 [人类操作者手册](../../docs/hardware/operator-guide.md#recording)，其中区分采集终端命令与其他遥操按键。
 
 一台主臂用于示教、一台从臂执行任务，记录的是**单执行臂**数据。
 复用 `examples/leader_follower_teleop.py` 的限位、速度前馈及夹爪力反馈逻辑。

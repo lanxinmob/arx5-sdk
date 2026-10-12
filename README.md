@@ -2,6 +2,8 @@
 
 ## 真机文档与 Agent 索引
 
+人类日常操作请读 [操作者手册](docs/hardware/operator-guide.md)：开机检查、启动命令、按键、采集与退出。
+
 从 [真机操作索引](docs/hardware/README.md) 开始，按顺序完成环境配置、设备核对、标定和控制入口选择。
 其中包含 [本机配置快照](docs/hardware/current-machine.md)、[新机器配置](docs/hardware/setup.md)、
 [日常操作](docs/hardware/operations.md)、[其他策略模型接入](docs/hardware/model-integration.md) 和
