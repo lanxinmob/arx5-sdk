@@ -32,7 +32,7 @@
 | 夹爪符号、全开角度、闭合零点、verify-zero | [标定](setup.md#calibration) | [标定入口](../../python/examples/calibrate.py)、[标定实现](../../src/app/joint_controller.cpp) |
 | SpaceMouse、spacenavd、双按钮、限位保持、初始夹爪全开 | [鼠标遥操](operations.md#spacemouse) | [直连示例](../../python/examples/spacemouse_teleop.py) |
 | Quest、10000、PosCmd、A/X、reset marker | [Quest 遥操](operations.md#quest) | [VR bridge](../../python/communication/vr_joint_bridge.py)、[解码器](../../python/communication/vr_receiver.py) |
-| 主从、拖动、重力倍率、力反馈 | [主从与拖动](operations.md#leader-follower) | [主从入口](../../python/examples/leader_follower_teleop.py)、[拖动入口](../../python/examples/drag_mode.py) |
+| 主从、拖动、重力倍率、力反馈、目标速度上限与回零反馈等待 | [主从与拖动](operations.md#leader-follower) | [主从入口](../../python/examples/leader_follower_teleop.py)、[拖动入口](../../python/examples/drag_mode.py) |
 | HDF5、record、RGB、频率、训练格式 | [采集流程](operations.md#recording) | [完整采集手册](../../python/recording/README.md)、[录制入口](../../python/examples/record_episodes.py) |
 | keyboard、teach/replay、waypoint、torque、X7、C++ 示例 | [其他入口与前置条件](operations.md#other-examples) | 表中逐项链接到入口源码；含额外硬编码标定 |
 | iPhUMI、USB、5555/5556、预览/MP4 | [相机配置](setup.md#peripherals)、[预览](operations.md#preview) | [相机预览](../../python/communication/wrist_camera_preview.py) |
@@ -71,6 +71,8 @@ checkpoint 路径与版本 / normalization key / 观测与动作形状:
 维护规则：新增控制入口时同步索引、标定覆盖表和退出矩阵；更换相机/夹爪/工具后重新核对快照及动作合同。测试产物用临时目录，验证完删除，不在仓库新增永久 test 文件。
 
 ## 本次文档验证
+
+2026-10-14 独立主从 CLI 增加两臂可选 SDK 目标速度上限，以及启动/h/退出回零位置反馈等待。延迟反馈、emergency、过期、NaN、超时、参数覆盖与非法零值离线检查通过；q/Ctrl+C/异常退出回归通过。真机人工测试的启动、跟随、暂停和正常退出有日志，操作者反馈“没有问题”；两臂线程和 CAN socket 释放后 5 秒无帧，原策略服务保持健康。主臂倍率 1.2 的自行漂移与本次显式 1.0 配置见 [快照补充](current-machine.md#证据与更新)。证据在相邻项目 `pi05/outputs/teleop-manual-20261014_144947/`；未保留测试源码。闭合零点、力反馈、全部姿态稳定性和 RLT 在线运行器未验收。
 
 2026-10-14 独立主从 CLI 退出修复：先停止并 join 控制线程；正常 q/键盘循环 Ctrl+C 再尝试回零，
 finally 请求两臂阻尼并显式释放。故障路径不额外回零，启动期间中断也执行释放；不改变 recorder 生命周期。

@@ -65,12 +65,17 @@ class LeaderFollowerTeleop:
         follower_gripper_open_readout: float = -3.45369,
         gripper_close_threshold: float = 0.001,
         follower_gripper_kp: float = None,
+        joint_speed_limit: float = None,
+        gripper_speed_limit: float = None,
     ):
         assert leader_interface != follower_interface
         if not np.isfinite(gripper_close_threshold) or not 0 <= gripper_close_threshold <= 0.005:
             raise ValueError("Gripper close threshold must be between 0 and 0.005 m")
         if follower_gripper_kp is not None and (not np.isfinite(follower_gripper_kp) or not 0 < follower_gripper_kp <= 10):
             raise ValueError("Follower gripper kp must be positive and at most 10")
+        for limit in (joint_speed_limit, gripper_speed_limit):
+            if limit is not None and (not np.isfinite(limit) or limit <= 0):
+                raise ValueError("Speed limits must be finite and positive")
         # Gripper force feedback gain: the leader's gripper motor is fed with
         # -force_scale * (follower's measured gripper torque). Per the SDK
         # convention, the follower's gripper torque is negative while it is
@@ -124,6 +129,11 @@ class LeaderFollowerTeleop:
             follower_robot_config.gripper_open_readout = follower_readout
 
         assert leader_robot_config.joint_dof == follower_robot_config.joint_dof
+        for robot in (leader_robot_config, follower_robot_config):
+            if joint_speed_limit is not None:
+                robot.joint_vel_max = np.minimum(robot.joint_vel_max, joint_speed_limit)
+            if gripper_speed_limit is not None:
+                robot.gripper_vel_max = min(robot.gripper_vel_max, gripper_speed_limit)
         self.dof = leader_robot_config.joint_dof
 
         self.leader = arx5.Arx5JointController(
@@ -157,10 +167,32 @@ class LeaderFollowerTeleop:
             return 0.0
         return float(np.clip(leader_width, 0.0, self.follower_gripper_width))
 
+    def _reset_to_home_and_wait(self, controller):
+        state = controller.get_joint_state()
+        robot = controller.get_robot_config()
+        travel_time = max(
+            float(np.max(np.abs(state.pos()) / robot.joint_vel_max)),
+            abs(state.gripper_pos - robot.gripper_width) / robot.gripper_vel_max,
+        )
+        controller.reset_to_home()
+        deadline = time.monotonic() + max(3.0, travel_time + 2.0)
+        while time.monotonic() < deadline:
+            state = controller.get_joint_state()
+            if controller.is_emergency():
+                raise RuntimeError("Emergency while waiting for home feedback")
+            if (not np.isfinite(state.pos()).all() or not np.isfinite(state.gripper_pos)
+                    or controller.get_timestamp() - state.timestamp > 0.1):
+                raise RuntimeError("Invalid or stale home feedback")
+            if (np.max(np.abs(state.pos())) <= 0.03
+                    and abs(state.gripper_pos - robot.gripper_width) <= 0.003):
+                return
+            time.sleep(0.01)
+        raise RuntimeError("Home feedback timed out (joint tolerance 0.03 rad, gripper 3 mm)")
+
     def start(self):
         print("Resetting both arms to home position...")
-        self.leader.reset_to_home()
-        self.follower.reset_to_home()
+        self._reset_to_home_and_wait(self.leader)
+        self._reset_to_home_and_wait(self.follower)
         # reset_to_home() ramps the gain back to default, so re-apply the
         # drag-mode gain to the leader afterwards
         self._setup_leader_drag_mode()
@@ -177,8 +209,8 @@ class LeaderFollowerTeleop:
         self.teleop_started = False
         self.command_enabled = False
         time.sleep(self.controller_dt * 5)  # let the control loop finish its cycle
-        self.follower.reset_to_home()
-        self.leader.reset_to_home()
+        self._reset_to_home_and_wait(self.follower)
+        self._reset_to_home_and_wait(self.leader)
         self._setup_leader_drag_mode()
         self.command_enabled = True
         print("Home position reached. Press [space] to start teleoperation again.")
@@ -187,8 +219,8 @@ class LeaderFollowerTeleop:
         self.teleop_started = False
         self.command_enabled = False
         time.sleep(self.controller_dt * 5)
-        self.follower.reset_to_home()
-        self.leader.reset_to_home()
+        self._reset_to_home_and_wait(self.follower)
+        self._reset_to_home_and_wait(self.leader)
 
     def close(self):
         """Release both controllers after the caller has joined the control loop."""
@@ -284,6 +316,8 @@ class LeaderFollowerTeleop:
                         f"gravity={config.gravity_compensation} emergency={controller.is_emergency()} "
                         f"kp={np.round(gain.kp(), 3).tolist()} "
                         f"kd={np.round(gain.kd(), 3).tolist()} "
+                        f"joint_pos={np.round(state.pos(), 4).tolist()} "
+                        f"joint_cmd={np.round(command.pos(), 4).tolist()} "
                         f"torque_cmd={np.round(command.torque(), 3).tolist()} "
                         f"velocity={np.round(state.vel(), 3).tolist()} "
                         f"gripper_mm={state.gripper_pos * 1000:.2f} "
@@ -337,6 +371,8 @@ class LeaderFollowerTeleop:
 @click.option("--follower-gripper-open-readout", type=float, default=-3.45369, show_default=True, help="Override the follower's fully-open motor readout; 0 uses its model default")
 @click.option("--gripper-close-threshold", type=click.FloatRange(min=0.0, max=0.005), default=0.001, show_default=True, help="Command fully closed below this leader width (m)")
 @click.option("--follower-gripper-kp", type=click.FloatRange(min=0.0, min_open=True, max=10.0), default=None, help="Follower gripper position gain override (up to 10)")
+@click.option("--joint-speed-limit", type=click.FloatRange(min=0.0, min_open=True), default=None, help="Cap both arms' SDK joint target speed in rad/s, including home")
+@click.option("--gripper-speed-limit", type=click.FloatRange(min=0.0, min_open=True), default=None, help="Cap both arms' SDK gripper target speed in m/s")
 def main(
     leader_model: str,
     leader_interface: str,
@@ -354,6 +390,8 @@ def main(
     follower_gripper_open_readout: float,
     gripper_close_threshold: float,
     follower_gripper_kp: float,
+    joint_speed_limit: float,
+    gripper_speed_limit: float,
 ):
     # Keep recorder imports usable in terminals without an X server.
     from pynput.keyboard import Key, KeyCode
@@ -379,6 +417,8 @@ def main(
         follower_gripper_open_readout=follower_gripper_open_readout,
         gripper_close_threshold=gripper_close_threshold,
         follower_gripper_kp=follower_gripper_kp,
+        joint_speed_limit=joint_speed_limit,
+        gripper_speed_limit=gripper_speed_limit,
     )
     teleop.diagnostics = diagnostics
     stop_event = threading.Event()

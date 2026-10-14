@@ -58,11 +58,14 @@ pgrep -af 'zmq_.*server|vr_joint_bridge|spacemouse|leader_follower|record_episod
 ```bash
 python examples/leader_follower_teleop.py X5 can1 X5_umi can0 \
   -g -3.2969 --follower-gripper-open-readout -3.45369 \
-  --leader-gravity-scale 1.2 --follower-gravity-scale 1.0 \
-  --gripper-close-threshold 0.001 --diagnostics
+  --leader-gravity-scale 1.0 --follower-gravity-scale 1.0 \
+  --joint-speed-limit 0.15 --gripper-speed-limit 0.01 \
+  --vel-ratio 0 --force-scale 0 --diagnostics
 ```
 
-1. 两臂会先依次回零；保持路径空闲，等它们实际停止并到位。
+本命令采用 2026-10-14 本机人工测试通过的参数。此前主臂重力倍率 1.2 时出现自行漂移；1.0 仍需逐姿态观察，速度前馈与夹爪力反馈另行验证。速度参数限制 SDK 目标，不限制人手拖动速度。夹爪闭合零点仍未验收。
+
+1. 两臂会先依次回零；程序等待关节距零位不超过 0.03 rad、夹爪距全开不超过 3 mm。保持路径空闲，等它们实际停止并到位；程序门槛不代表精确零位或静止。
 2. 左臂可用手轻轻拖动，右臂暂时保持位置。先调整到适合示教的姿态。
 3. 按一下空格开始跟随，小幅移动左臂，确认右臂跟随方向及夹爪动作正确。开始跟随可能让右臂向左臂对应姿态运动，两臂起始姿态不要差得过大。
 4. 暂停时按空格；正常结束按小写 `q` 或在终端按 Ctrl+C，等待控制线程停止、回零、阻尼与程序退出。启动或控制异常时会请求阻尼并释放两臂，不额外回零。

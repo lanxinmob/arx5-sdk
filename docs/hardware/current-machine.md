@@ -73,7 +73,8 @@ python -B examples/record_episodes.py --check-cameras --no-preview \
 | 入口 | 当前实际覆盖 | 迁移方式 |
 | --- | --- | --- |
 | `RobotConfigFactory` | X5/X5_umi 全开读数 `-3.25952`；宽度分别 `0.088/0.086 m` | Python 构造前赋值，或修改工厂并重编译 |
-| `leader_follower_teleop.py`、`record_episodes.py` | 主臂 `-3.2969`，从臂 `-3.45369`；主重力倍率 1.2、从 1.0 | `-g`、`--follower-gripper-open-readout`、两臂 gravity-scale；0 读数表示用机型默认值 |
+| `leader_follower_teleop.py` | 默认主臂 `-3.2969`，从臂 `-3.45369`；主重力倍率 1.2、从 1.0；速度不额外覆盖 | `-g`、`--follower-gripper-open-readout`、两臂 gravity-scale；0 读数表示用机型默认值。可选两臂 SDK 目标速度上限 `--joint-speed-limit` / `--gripper-speed-limit` |
+| `record_episodes.py` | 主臂 `-3.2969`，从臂 `-3.45369`；主重力倍率 1.2、从 1.0 | 两臂标定/gravity-scale CLI；独立 teleop 的新速度参数与回零等待不适用于 recorder |
 | `spacemouse_teleop.py` 直连 | 全开读数默认 0，表示保留机型默认值；启动/回零后的夹爪目标为 `gripper_width` 全开；IK 拒绝时保持最后有效目标 | 本机右臂显式 `--gripper-open-readout -3.45369`，左臂 `-3.2969`；限位保持不改变构造前标定 |
 | `zmq_joint_server.py` | 所有机型硬编码 `-3.37472` | 修改 `serve()` 中构造前赋值，双臂时按 model/interface 分配；当前没有标定 CLI |
 | `zmq_server_agent_safe.py` | 所有机型硬编码 `-3.37472` | 修改构造中的 `robot_config` 赋值；另设 `--gripper-max` 匹配宽度 |
@@ -84,6 +85,8 @@ python -B examples/record_episodes.py --check-cameras --no-preview \
 主从/采集闭合阈值为 `0.001 m`，夹爪 kp 默认 5。已有记录指出实物闭合小缝及重复性仍未完全解决；这些读数不是精度保证。SDK 接触保持在默认阈值 `0.75 Nm` 触发，1 mm 卸载，反向命令超过 0.5 mm 释放；默认 `1.5 Nm` 过流检测仍保留，见 [排障](troubleshooting.md#gripper)。
 
 ## 证据与更新
+
+2026-10-14 独立主从 CLI 真机人工测试通过，操作者反馈“没有问题”：左 X5/can1、右 X5_umi/can0，标定保留上述值，两臂重力倍率显式 1.0，SDK 目标速度上限 0.15 rad/s / 0.01 m/s，速度前馈和夹爪力反馈均关闭。启动、space 跟随/暂停、正常退出回零及两臂释放有日志；退出后 CAN 5 秒无帧。此前倍率 1.2 下主臂第二关节自行移动约 0.058 rad，不能算人工输入；1.0 的 6 秒局部观察及本次现场反馈不证明全部姿态稳定。闭合零点、力反馈和长时运行仍待验证。详细记录和本机证据见相邻项目 [硬件报告](../../../pi05/HARDWARE_LINK_REPORT.md)。
 
 - 系统事实：`/etc/os-release`、`lsusb`、`/dev/serial/by-id`、`/dev/v4l/by-id`、`/etc/udev/rules.d/arx_can.rules`、`/etc/systemd/system/arxcan-setup.service`、`ip -details -statistics link show can0/can1`、`systemctl is-active`、`pgrep -af`、`ss -lntp`。
 - 软件事实：本页 Python 导入检查、包 metadata、[配置工厂](../../include/app/config.h) 及各入口的构造代码。
