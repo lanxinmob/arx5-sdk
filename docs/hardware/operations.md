@@ -97,7 +97,11 @@ python examples/leader_follower_teleop.py X5 can1 X5_umi can0 --diagnostics
 
 启动依次回零主/从臂；主臂重力补偿拖动、kp=0、kd=SDK 默认的 0.05 倍，从臂位置保持。桌面键盘监听 `space` 开始/暂停跟随，`h` 两臂回零，`q` 或 Ctrl+C 正常退出回零。跟随用主臂关节绝对角度裁剪至从臂限位，速度前馈 `--vel-ratio 0.3`；夹爪主臂 <=1 mm 时从臂目标 0，否则裁剪至从臂宽度。
 
-暂停主从遥操时从臂位置保持，不能像 recorder 待机那样自由拖动。主臂重力倍率 1.2、从臂 1.0；夹爪力反馈 `--force-scale 0.5`，反馈力矩夹至 0.6 Nm，0 禁用。诊断同时显示 gravity、emergency、kp/kd、输出力矩、速度、夹爪测量/命令 mm 和力矩；输出力矩不是电机实际产生的力矩。主从控制线程异常路径没有 recorder 那样统一恢复保证，需看退出实测状态。
+暂停主从遥操时从臂位置保持，不能像 recorder 待机那样自由拖动。主臂重力倍率 1.2、从臂 1.0；夹爪力反馈 `--force-scale 0.5`，反馈力矩夹至 0.6 Nm，0 禁用。诊断同时显示 gravity、emergency、kp/kd、输出力矩、速度、夹爪测量/命令 mm 和力矩；输出力矩不是电机实际产生的力矩。
+
+独立主从 CLI 在 q/键盘循环 Ctrl+C 后先停止并等待控制线程，再尝试回零，最后请求两臂阻尼并释放控制器。
+启动回零、键盘或控制循环异常时也执行释放；故障路径不额外回零。启动期间 Ctrl+C 走异常释放。
+此清理不改变 recorder 的生命周期，也不处理 SIGTERM/SIGKILL、断电或通信失效；退出仍需核对实测状态和 CAN 停发。
 
 单臂自由拖动（也是电机操作，启动先 home）：
 
@@ -160,7 +164,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | guarded Cartesian ZMQ | disarmed；reset 后用 SDK reset 命令位姿 arm | 默认 2 s 无接受末端目标，阻尼/disarm；不回零 | Ctrl+C close 请求阻尼；SIGTERM 无自定义 handler，不当成同等恢复路径 |
 | SpaceMouse 直连 | 启动立即 reset；双钮再次 reset；夹爪目标均全开 | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
 | Quest bridge | 两手流到达后双臂 reset | stale hold 后 packet loss 停止，reset 阶段例外 | 健康 armed 臂慢回零保持夹爪，再阻尼 |
-| 主从 teleop | 主从依次 reset，space 跟随 | 暂停从臂位置保持，主臂拖动 | q/Ctrl+C 尝试回零，异常恢复不等同 recorder |
+| 主从 teleop | 主从依次 reset，space 跟随 | 暂停从臂位置保持，主臂拖动 | q/键盘循环 Ctrl+C 先 join 控制线程再尝试回零；finally 阻尼并释放；异常不额外回零 |
 | recorder | 相机/预览验证后同步 reset | 待机两臂拖动；每轮结束不自动 home | 信号/故障等尝试同步慢回零全开夹爪，然后 SDK 析构 |
 | 旧 `zmq_server.py` | Cartesian controller；默认 bind 0.0.0.0:8765 | 默认 60 s 无消息，会 home/阻尼/释放控制器；读请求可使行为不同于 accepted-action watchdog | 旧路径，恢复配置与 guard 不同；新 agent 不应默认选它 |
 

@@ -190,6 +190,25 @@ class LeaderFollowerTeleop:
         self.follower.reset_to_home()
         self.leader.reset_to_home()
 
+    def close(self):
+        """Release both controllers after the caller has joined the control loop."""
+        self.command_enabled = False
+        self.teleop_started = False
+        errors = []
+        for name in ("follower", "leader"):
+            controller = getattr(self, name, None)
+            if controller is None:
+                continue
+            try:
+                controller.set_to_damping()
+            except Exception as error:
+                errors.append(f"{name}: {error}")
+            finally:
+                setattr(self, name, None)
+                del controller
+        if errors:
+            raise RuntimeError("Teleoperation shutdown failed: " + "; ".join(errors))
+
     def _apply_gripper_force_feedback(self, leader_state, follower_gripper_torque: float):
         """
         Stream a command to the leader arm so that its gripper motor feels
@@ -362,43 +381,52 @@ def main(
         follower_gripper_kp=follower_gripper_kp,
     )
     teleop.diagnostics = diagnostics
-    teleop.start()
-
+    stop_event = threading.Event()
+    control_thread = None
     control_error = []
 
     def control_loop():
         try:
-            teleop.run()
+            teleop.run(stop_event=stop_event)
         except Exception as e:
             control_error.append(e)
             print(f"Teleoperation control failed: {e}", flush=True)
 
-    control_thread = threading.Thread(target=control_loop, daemon=True)
-    control_thread.start()
-
     try:
-        with KeystrokeCounter() as key_counter:
-            while True:
-                if control_error:
-                    raise control_error[0]
-                for key_stroke in key_counter.get_press_events():
-                    if key_stroke in space_keys:
-                        teleop.teleop_started = not teleop.teleop_started
-                        state_str = "STARTED" if teleop.teleop_started else "PAUSED"
-                        print(f"\nTeleoperation {state_str}.")
-                    elif key_stroke == KeyCode(char="h"):
-                        teleop.go_home()
-                    elif key_stroke == KeyCode(char="q"):
-                        raise KeyboardInterrupt
-                time.sleep(0.02)
-    except KeyboardInterrupt:
-        pass
+        teleop.start()
+        control_thread = threading.Thread(target=control_loop, daemon=True)
+        control_thread.start()
+        try:
+            with KeystrokeCounter() as key_counter:
+                while True:
+                    if control_error:
+                        raise control_error[0]
+                    for key_stroke in key_counter.get_press_events():
+                        if key_stroke in space_keys:
+                            teleop.teleop_started = not teleop.teleop_started
+                            state_str = "STARTED" if teleop.teleop_started else "PAUSED"
+                            print(f"\nTeleoperation {state_str}.")
+                        elif key_stroke == KeyCode(char="h"):
+                            teleop.go_home()
+                        elif key_stroke == KeyCode(char="q"):
+                            raise KeyboardInterrupt
+                    time.sleep(0.02)
+        except KeyboardInterrupt:
+            pass
 
-    if control_error:
-        raise control_error[0]
-
-    print("\nExiting: resetting both arms to home position...")
-    teleop.go_home_and_stop()
+        teleop.command_enabled = False
+        stop_event.set()
+        control_thread.join()
+        if control_error:
+            raise control_error[0]
+        print("\nExiting: resetting both arms to home position...")
+        teleop.go_home_and_stop()
+    finally:
+        teleop.command_enabled = False
+        stop_event.set()
+        if control_thread is not None:
+            control_thread.join()
+        teleop.close()
     print("Done.")
 
 
