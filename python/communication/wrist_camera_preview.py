@@ -41,7 +41,8 @@ class CameraFeed:
                 camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
                 camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                 camera.set(cv2.CAP_PROP_FPS, 30)
-                camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                # Keep capture running while OpenCV decodes the preceding UVC frame.
+                camera.set(cv2.CAP_PROP_BUFFERSIZE, 2)
                 while not self.stop.is_set():
                     ok, frame = camera.read()
                     if not ok:
@@ -76,13 +77,13 @@ def receive_iphone_usb(sender, port):
             try:
                 devices = pypeertalk.get_connected_devices()
                 if devices:
-                    sender.send_bytes(b"")
+                    sender.send((time.monotonic(), b""))
                     client = pypeertalk.PeerTalkClient(devices[0], port, 1)
                     while True:
                         message = client.get_latest_message(1000)
                         if not message:
                             break
-                        sender.send_bytes(message)
+                        sender.send((time.monotonic(), message))
             except Exception as error:
                 now = time.monotonic()
                 if now - last_error >= 10:
@@ -115,16 +116,16 @@ class IPhoneUSBFeed:
         self.started = time.monotonic()
 
     def latest(self):
-        jpeg = None
+        jpeg, arrived = None, 0.0
         try:
             for _ in range(8):
                 if not self.receiver.poll():
                     break
-                message = self.receiver.recv_bytes()
+                received, message = self.receiver.recv()
                 if message:
-                    jpeg = message
+                    jpeg, arrived = message, received
                 elif self.connected == 0:
-                    self.connected = time.monotonic()
+                    self.connected = received
         except (EOFError, OSError):
             pass
         if jpeg:
@@ -133,7 +134,8 @@ class IPhoneUSBFeed:
                 if self.received == 0:
                     print(f"iPHUMI USB {self.stream}: {frame.shape[1]}x{frame.shape[0]}", flush=True)
                 self.frame = frame
-                self.received = time.monotonic()
+                # Preserve host arrival time across pipe backpressure and JPEG decoding.
+                self.received = arrived
         now = time.monotonic()
         if ((not self.process.is_alive() and now - self.started > 5)
                 or (self.connected and now - max(self.received, self.connected) > 5)):

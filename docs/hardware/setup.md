@@ -230,6 +230,13 @@ python -B -c 'import pypeertalk; print(pypeertalk.get_connected_devices())'
 
 设备列表非空只证明能枚举，需预览检查 main/ultrawide 实际画面。USB 主视角通过 PeerTalk 传输，不是 `/dev/video*`；当前 HDF5 recorder 的 `--main-camera` 只接受 OpenCV/V4L2 类设备，不能把手机 USB 端口直接填进去。
 
+USB 预览的 `latest()` 时间戳为接收子进程拿到 JPEG 时的主机 monotonic 时间，
+保留管道等待和解码耗时，过期帧不会因重新解码变成新帧。它不包含手机编码前的延迟，
+也不是三相机的同步曝光时间；真机部署仍须检查视野、连续出帧及端到端延迟。
+三视图预览的腕相机配置为 MJPG 1280x720/30 FPS，使用两个 UVC 缓冲，
+后台持续读取并仅保留最新帧。本机 Vin 4 对比实测单缓冲为 16.39 FPS、双缓冲为 30.00 FPS；
+这与 HDF5 recorder 的 1920x1080/60 FPS 配置不同。
+
 ## 配置交付
 
 留下 [索引中的交接记录](README.md)，并依 [操作](operations.md) 和 [模型接入验收](model-integration.md#migration) 完成所选路径。记录 SDK 路径、git 版本、有效标定和真实设备映射；离线检查、相机检查、实机动作验收分别注明。没有实际控制反馈时只报告软件/外设配置完成。
