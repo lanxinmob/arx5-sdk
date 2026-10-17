@@ -37,10 +37,12 @@ python -B -c 'import arx5_interface as s; print(s.__file__)'
 停止选定 CAN 的 server/其他 controller 后：
 
 ```bash
-python examples/spacemouse_teleop.py X5_umi can0 --gripper-open-readout -3.45369
+python examples/spacemouse_teleop.py X5_umi can0
 # 或只运行左臂
 python examples/spacemouse_teleop.py X5 can1 --gripper-open-readout -3.2969
 ```
+
+`-g` / `--gripper-open-readout` 默认 `-3.45369`，在构造控制器前覆盖夹爪全开读数；此值针对本机右臂。其他臂显式传入对应标定，`-g 0` 使用机型默认值。
 
 启动立即回零，不需要双按钮 arm。默认 100 Hz 目标更新、平移 0.1 m/s、旋转 0.3 rad/s、夹爪 0.04 m/s；这些在脚本内设置。双按钮请求回零并重置遥操目标；Ctrl+C 回零再阻尼。没有外设断流检查/显式 arm 状态；发生未捕获异常时不能假定会回零。此入口使用 shared memory/atomics、spnav。
 
@@ -168,7 +170,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | SDK controller | 构造即收发电机，初始 kp=0/阻尼增益；可能有重力输出 | 没有应用层 watchdog，后台继续最后插值/输出 | 默认析构关闭重力并约 2 s 阻尼；非断电 |
 | joint ZMQ | 启动 disarmed；`RESET_TO_HOME` 全开夹爪并 armed | armed 后默认 2 s 无接受关节目标，尝试两段慢回零保持夹爪，再 disarm/阻尼 | server 停止同样尝试慢回零；`SET_TO_DAMPING` 直接 disarm |
 | guarded Cartesian ZMQ | disarmed；reset 后用 SDK reset 命令位姿 arm | 默认 2 s 无接受末端目标，阻尼/disarm；不回零 | Ctrl+C close 请求阻尼；SIGTERM 无自定义 handler，不当成同等恢复路径 |
-| SpaceMouse 直连 | 启动立即 reset；双钮再次 reset；夹爪目标均全开 | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
+| SpaceMouse 直连 | 构造前应用夹爪读数（默认 `-3.45369`）；启动立即 reset；双钮再次 reset；夹爪目标均全开 | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
 | Quest bridge | 两手流到达后双臂 reset | stale hold 后 packet loss 停止，reset 阶段例外 | 健康 armed 臂慢回零保持夹爪，再阻尼 |
 | 主从 teleop | 主从依次 reset 并等待位置反馈门槛，space 跟随 | 暂停从臂位置保持，主臂拖动；h 回零也等待反馈 | q/键盘循环 Ctrl+C 先 join 控制线程再尝试回零并等待反馈；finally 阻尼并释放；异常不额外回零 |
 | recorder | 相机/预览验证后同步 reset | 待机两臂拖动；每轮结束不自动 home | 信号/故障等尝试同步慢回零全开夹爪，然后 SDK 析构 |

@@ -128,7 +128,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 确认右臂没有其他控制程序，再运行：
 
 ```bash
-python examples/spacemouse_teleop.py X5_umi can0 --gripper-open-readout -3.45369
+python examples/spacemouse_teleop.py X5_umi can0
 ```
 
 若操作左臂，用下面命令替代，不能原样沿用右臂参数：

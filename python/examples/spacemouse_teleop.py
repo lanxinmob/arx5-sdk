@@ -174,7 +174,7 @@ def start_teleop_recording(controller: Arx5CartesianController):
 @click.argument("model")  # ARX arm model: X5 or L5
 @click.argument("interface")  # can bus name (can0 etc.)
 @click.option(
-    "--gripper-open-readout", "-g", type=float, default=0.0, show_default=True,
+    "--gripper-open-readout", "-g", type=float, default=-3.45369, show_default=True,
     help="Fully-open gripper motor angle; 0 uses the model default.",
 )
 def main(model: str, interface: str, gripper_open_readout: float):

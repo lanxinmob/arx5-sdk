@@ -308,13 +308,15 @@ For direct SpaceMouse control on this machine, stop other controllers on the
 chosen CAN interface, activate `arx5`, and run from the `python` directory:
 
 ```bash
-python examples/spacemouse_teleop.py X5_umi can0 --gripper-open-readout -3.45369
+python examples/spacemouse_teleop.py X5_umi can0
 # Left arm:
 python examples/spacemouse_teleop.py X5 can1 --gripper-open-readout -3.2969
 ```
 
 The script uses the local SDK first and applies the gripper calibration before
-creating the controller. These readouts are specific to the current arms;
+creating the controller. `--gripper-open-readout` (`-g`) defaults to `-3.45369`
+for the current right arm; pass another value to override it, or `-g 0` to use
+the model default. These readouts are specific to the current arms;
 use `examples/calibrate.py` after changing hardware. Startup immediately moves
 the arm to home with the gripper fully open; tracking starts and resumes after
 a two-button reset from the fully open gripper target. Keep the home path clear.
