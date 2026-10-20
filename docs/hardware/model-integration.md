@@ -91,7 +91,7 @@ shape 必须为 `(joint_dof,)` 和标量，全部 finite 且在 SDK 范围内；
 
 三个数组长度必须相同，时间严格递增且单位为秒；server 会丢弃已经到期的点，将剩余点转换为 SDK 时间戳后一次调用 `set_joint_traj()`。SDK 在内部按控制器频率连续插值，回复仍是提交时的实测状态。
 
-joint server 没有 `GET_SERVER_INFO`，不回传有效 calibration/config；从启动日志与配置记录证明实际机型，用同一 URDF 的 FK 比较反馈姿态可补充检查，但单姿态匹配不足以证明所有模型/标定完全一致。接受的 SET_JOINT_POS 和成功 reset 更新动作计时，return 在每段回零命令提交时更新；已在 0.05 rad home 容差内直接返回时不刷新。单纯 GET_STATE 不续命。armed 后无接受目标默认 2 s 触发慢 home/阻尼，详见退出矩阵。
+joint server 没有 `GET_SERVER_INFO`，不回传有效 calibration/config；从启动日志与配置记录证明实际机型，用同一 URDF 的 FK 比较反馈姿态可补充检查，但单姿态匹配不足以证明所有模型/标定完全一致。接受的 `SET_JOINT_POS`、`SET_JOINT_TRAJ` 和成功 reset 更新动作计时，return 在每段回零命令提交时更新；已在 0.05 rad home 容差内直接返回时不刷新。单纯 GET_STATE 不续命。armed 后无接受目标默认 2 s 触发慢 home/阻尼，详见退出矩阵。
 
 ### guarded Cartesian server
 
