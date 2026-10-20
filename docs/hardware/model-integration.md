@@ -79,7 +79,7 @@ python communication/zmq_joint_server.py X5_umi can0 \
 
 shape 必须为 `(joint_dof,)` 和标量，全部 finite 且在 SDK 范围内；不接收 velocity、timestamp 等额外 data 字段。server 使用 `controller.get_timestamp()+duration` 安排插值，默认 0.05 s；要求 `0 < duration < timeout`。命令回复的 state 是提交后当前反馈，尚未等目标到达。
 
-连续动作应优先使用 `SET_JOINT_TRAJ`，避免每个控制周期用 `SET_JOINT_POS` 覆盖 SDK 的未来轨迹：
+连续动作应优先使用 `SET_JOINT_TRAJ`，避免每个控制周期用 `SET_JOINT_POS` 覆盖 SDK 的未来轨迹。上游策略可以先将稀疏动作按时间线性重采样到控制网格，再提交整段轨迹：
 
 ```python
 {"cmd": "SET_JOINT_TRAJ", "data": {
