@@ -29,10 +29,13 @@ class JointServer:
         self.armed = False
         self.mode = "damping"
         self.last_action = 0.0
-        # Keep the SDK's configured gains so DRAG/HOLD can switch modes
-        # without duplicating robot-specific controller constants.
-        self.hold_gain = controller.get_gain()
-        self.drag_gain = controller.get_gain()
+        self.hold_gain = None
+        self.drag_gain = None
+
+    def refresh_gains(self):
+        """Capture default gains after SDK reset has initialized them."""
+        self.hold_gain = self.controller.get_gain()
+        self.drag_gain = self.controller.get_gain()
         self.drag_gain.kp()[:] = 0.0
         self.drag_gain.kd()[:] = self.hold_gain.kd() * 0.05
         self.drag_gain.gripper_kp = 0.0
@@ -59,6 +62,8 @@ class JointServer:
         """Enable low-gain physical dragging without accepting targets."""
         if self.controller.is_emergency():
             raise ValueError("SDK emergency is latched; resolve fault and restart controller")
+        if self.drag_gain is None:
+            self.refresh_gains()
         self.controller.set_gain(self.drag_gain)
         self.armed = False
         self.mode = "drag"
@@ -76,6 +81,8 @@ class JointServer:
         command.gripper_pos = gripper
         command.timestamp = self.controller.get_timestamp() + self.duration
         self.controller.set_joint_cmd(command)
+        if self.hold_gain is None:
+            self.refresh_gains()
         self.controller.set_gain(self.hold_gain)
         self.armed = True
         self.mode = "hold"
@@ -190,6 +197,7 @@ class JointServer:
                 time.sleep(0.55)
                 if self.controller.is_emergency():
                     raise ValueError("SDK emergency during reset")
+                self.refresh_gains()
                 self.last_action = time.monotonic()
                 self.armed = True
                 self.mode = "hold"
