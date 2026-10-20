@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 HOME_SPEED = 0.4  # Maximum planned joint speed in rad/s during return to home.
 HOME_TOLERANCE = 0.05
+HOLD_GAIN_RAMP_S = 0.1
+HOLD_GAIN_RAMP_STEPS = 5
 
 
 class JointServer:
@@ -81,7 +83,13 @@ class JointServer:
         # pins the interpolator to the measured state, so HOLD starts from the
         # pose at which the operator released the arm.
         self.controller.set_to_damping()
-        self.controller.set_gain(self.hold_gain)
+        damping_gain = self.controller.get_gain()
+        for alpha in np.linspace(0.0, 1.0, HOLD_GAIN_RAMP_STEPS + 1)[1:]:
+            self.controller.set_gain(
+                damping_gain * (1.0 - float(alpha))
+                + self.hold_gain * float(alpha)
+            )
+            time.sleep(HOLD_GAIN_RAMP_S / HOLD_GAIN_RAMP_STEPS)
         self.armed = True
         self.mode = "hold"
         self.last_action = time.monotonic()

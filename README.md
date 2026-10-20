@@ -41,7 +41,8 @@ for single-point teleoperation and homing helpers.
 
 For human-to-policy handoff, the joint server handles `HOLD` by first pinning
 the SDK interpolator to the measured joint state, then enabling position gains.
-This prevents the old reset/home command from being exposed when `c` is pressed.
+The gains ramp over 100 ms, which prevents the old reset/home command or a
+residual hand motion from producing a shock when `c` is pressed.
 
 In terminal 2, start the Quest bridge:
 
