@@ -317,7 +317,7 @@ class ControllerConfigFactory
             true,                                                               // gravity_compensation
             true,                                                               // background_send_recv
             true,                                                               // shutdown_to_passive
-            "linear",                                                           // interpolation_method
+            "cubic",                                                            // interpolation_method
             0.0                                                                 // default_preview_time
         );
         configurations["joint_controller_6"] = std::make_shared<ControllerConfig>(
@@ -331,7 +331,7 @@ class ControllerConfigFactory
             true,                                                         // gravity_compensation
             true,                                                         // background_send_recv
             true,                                                         // shutdown_to_passive
-            "linear",                                                     // interpolation_method
+            "cubic",                                                      // interpolation_method
             0.0                                                           // default_preview_time
         );
         configurations["cartesian_controller_7"] = std::make_shared<ControllerConfig>(

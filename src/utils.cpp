@@ -381,6 +381,7 @@ JointState JointStateInterpolator::interpolate(double time)
                 interp_result.timestamp = time;
 
                 // Cubic interpolation for pos and vel
+                double duration = end_state.timestamp - start_state.timestamp;
                 double t = (time - start_state.timestamp) / (end_state.timestamp - start_state.timestamp);
                 double t2 = t * t;
                 double t3 = t2 * t;
@@ -389,14 +390,17 @@ JointState JointStateInterpolator::interpolate(double time)
                 double pos_c = -2 * t3 + 3 * t2;
                 double pos_d = t3 - t2;
                 interp_result.pos =
-                    pos_a * start_state.pos + pos_b * start_state.vel + pos_c * end_state.pos + pos_d * end_state.vel;
+                    pos_a * start_state.pos + pos_b * duration * start_state.vel + pos_c * end_state.pos +
+                    pos_d * duration * end_state.vel;
 
                 double vel_a = 6 * t2 - 6 * t;
                 double vel_b = 3 * t2 - 4 * t + 1;
                 double vel_c = -6 * t2 + 6 * t;
                 double vel_d = 3 * t2 - 2 * t;
                 interp_result.vel =
-                    vel_a * start_state.pos + vel_b * start_state.vel + vel_c * end_state.pos + vel_d * end_state.vel;
+                    (vel_a * start_state.pos + vel_b * duration * start_state.vel + vel_c * end_state.pos +
+                     vel_d * duration * end_state.vel) /
+                    duration;
                 return interp_result;
             }
         }
