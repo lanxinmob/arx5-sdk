@@ -181,6 +181,69 @@ class JointServer:
         self.last_action = time.monotonic()
         return self.state()
 
+    def set_trajectory(self, data):
+        """Replace the SDK's future trajectory with a timed joint trajectory.
+
+        ``time_from_now`` is expressed in seconds from receipt of this request.
+        The SDK keeps the resulting trajectory and performs the interpolation at
+        its own controller rate; callers do not need to stream single points.
+        """
+        if not self.armed:
+            raise ValueError("RESET_TO_HOME is required before joint commands")
+        if self.controller.is_emergency():
+            raise ValueError("SDK emergency is latched; resolve fault and restart controller")
+        if not isinstance(data, dict) or set(data) != {
+            "joint_pos", "gripper_pos", "time_from_now"
+        }:
+            raise ValueError(
+                "Expected joint_pos, gripper_pos, and time_from_now only"
+            )
+
+        positions = np.asarray(data["joint_pos"], dtype=float)
+        grippers = np.asarray(data["gripper_pos"], dtype=float)
+        offsets = np.asarray(data["time_from_now"], dtype=float)
+        if positions.ndim != 2 or positions.shape[1] != self.robot.joint_dof:
+            raise ValueError("Invalid joint trajectory shape")
+        if grippers.shape != (positions.shape[0],) or offsets.shape != grippers.shape:
+            raise ValueError("Trajectory fields must have matching lengths")
+        if positions.shape[0] == 0:
+            raise ValueError("Joint trajectory must contain at least one waypoint")
+        if (
+            not np.isfinite(positions).all()
+            or not np.isfinite(grippers).all()
+            or not np.isfinite(offsets).all()
+        ):
+            raise ValueError("Trajectory values must be finite")
+        if np.any(np.diff(offsets) <= 0):
+            raise ValueError("Trajectory times must be strictly ascending")
+        if np.any(positions < self.robot.joint_pos_min) or np.any(
+            positions > self.robot.joint_pos_max
+        ):
+            raise ValueError("Joint position outside SDK limits")
+        if np.any(grippers < 0) or np.any(grippers > self.robot.gripper_width):
+            raise ValueError("Gripper outside SDK limits (meters)")
+
+        # The action clock is a wall-clock timestamp in the policy process.  A
+        # waypoint that is already due is discarded here; the SDK still gets a
+        # complete future trajectory in one call.
+        future = offsets > 0
+        if not np.any(future):
+            raise ValueError("Joint trajectory has no future waypoints")
+        positions = positions[future]
+        grippers = grippers[future]
+        offsets = offsets[future]
+        start_time = self.controller.get_timestamp()
+        trajectory = []
+        for position, gripper, offset in zip(positions, grippers, offsets):
+            command = self.sdk.JointState(self.robot.joint_dof)
+            command.pos()[:] = position
+            command.gripper_pos = float(gripper)
+            command.timestamp = start_time + float(offset)
+            trajectory.append(command)
+        self.controller.set_joint_traj(trajectory)
+        self.last_action = time.monotonic()
+        return self.state()
+
     def handle(self, message):
         cmd = message.get("cmd", "UNKNOWN") if isinstance(message, dict) else "UNKNOWN"
         if not isinstance(cmd, str):
@@ -215,6 +278,8 @@ class JointServer:
                 data = "OK"
             elif cmd == "SET_JOINT_POS":
                 data = self.set_position(message.get("data"))
+            elif cmd == "SET_JOINT_TRAJ":
+                data = self.set_trajectory(message.get("data"))
             else:
                 raise ValueError(f"Unsupported command: {cmd}")
             return {"cmd": cmd, "data": data}
@@ -234,6 +299,8 @@ def serve(model, interface, port, bind, timeout, duration):
 
     if not hasattr(sdk.Arx5JointController, "is_emergency"):
         raise RuntimeError("Build the patched local SDK first (see README)")
+    if not hasattr(sdk.Arx5JointController, "set_joint_traj"):
+        raise RuntimeError("SDK binding lacks set_joint_traj; rebuild the local SDK")
     robot = sdk.RobotConfigFactory.get_instance().get_config(model)
     robot.gripper_open_readout = -3.37472  # Same calibration as zmq_server.py.
     config = sdk.ControllerConfigFactory.get_instance().get_config("joint_controller", robot.joint_dof)

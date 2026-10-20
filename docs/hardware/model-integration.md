@@ -21,7 +21,7 @@
 
 | 模型经还原后的动作 | 本库接口 | 接入前必须补足 |
 | --- | --- | --- |
-| ARX 绝对关节角 + 夹爪宽度 | joint server `SET_JOINT_POS` | 对应实物 DOF/关节顺序，逐步速度/加速度约束及场景边界；server 仅校验位置，不提供完整 Cartesian guard |
+| ARX 绝对关节角 + 夹爪宽度 | joint server `SET_JOINT_TRAJ` / `SET_JOINT_POS` | 对应实物 DOF/关节顺序，逐步速度/加速度约束及场景边界；server 仅校验位置，不提供完整 Cartesian guard |
 | ARX 基座系绝对 EEF 位姿 + 夹爪宽度 | guarded server `SET_EE_POSE` | 工作空间、夹爪上限、per-command 步幅及有效标定 |
 | tool/base-frame EEF 增量 | 适配器还原成绝对 EEF，再 guarded server | 增量参考点、左乘/右乘、时间/角度单位和工具变换 |
 | 关节速度、力矩或其他机器人的关节值 | 当前两个 server 无直接支持 | 在明确动力学/动作定义后实现适配，不能将值塞入 position 字段 |
@@ -66,6 +66,7 @@ python communication/zmq_joint_server.py X5_umi can0 \
 | `GET_STATE` | None；返回 joint/EEF/gripper/timestamp/emergency/armed |
 | `RESET_TO_HOME` | None；回零全开夹爪并 arm，回复 OK |
 | `SET_JOINT_POS` | 精确包含 `joint_pos` 和 `gripper_pos`；返回实测状态 |
+| `SET_JOINT_TRAJ` | 精确包含 `(N, joint_dof)` 的 `joint_pos`、`(N,)` 的 `gripper_pos` 和 `(N,)` 的 `time_from_now`；一次替换 SDK 的未来轨迹并返回实测状态 |
 | `RETURN_TO_HOME` | None；仅 armed/健康时慢回零，保持当前夹爪；回复 OK 后仍 armed |
 | `SET_TO_DAMPING` | None；disarm/阻尼，回复 OK |
 
@@ -77,6 +78,18 @@ python communication/zmq_joint_server.py X5_umi can0 \
 ```
 
 shape 必须为 `(joint_dof,)` 和标量，全部 finite 且在 SDK 范围内；不接收 velocity、timestamp 等额外 data 字段。server 使用 `controller.get_timestamp()+duration` 安排插值，默认 0.05 s；要求 `0 < duration < timeout`。命令回复的 state 是提交后当前反馈，尚未等目标到达。
+
+连续动作应优先使用 `SET_JOINT_TRAJ`，避免每个控制周期用 `SET_JOINT_POS` 覆盖 SDK 的未来轨迹：
+
+```python
+{"cmd": "SET_JOINT_TRAJ", "data": {
+    "joint_pos": [[q0, q1, q2, q3, q4, q5], ...],
+    "gripper_pos": [width_m, ...],
+    "time_from_now": [0.20, 0.40, ...],
+}}
+```
+
+三个数组长度必须相同，时间严格递增且单位为秒；server 会丢弃已经到期的点，将剩余点转换为 SDK 时间戳后一次调用 `set_joint_traj()`。SDK 在内部按控制器频率连续插值，回复仍是提交时的实测状态。
 
 joint server 没有 `GET_SERVER_INFO`，不回传有效 calibration/config；从启动日志与配置记录证明实际机型，用同一 URDF 的 FK 比较反馈姿态可补充检查，但单姿态匹配不足以证明所有模型/标定完全一致。接受的 SET_JOINT_POS 和成功 reset 更新动作计时，return 在每段回零命令提交时更新；已在 0.05 rad home 容差内直接返回时不刷新。单纯 GET_STATE 不续命。armed 后无接受目标默认 2 s 触发慢 home/阻尼，详见退出矩阵。
 
