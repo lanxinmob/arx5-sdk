@@ -21,6 +21,7 @@ pybind11_add_module(arx5_interface
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/libcan)
 add_compile_options(-pthread)
+add_compile_definitions(SDK_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm.*|arm|aarch64")
     set(LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../lib/aarch64)
