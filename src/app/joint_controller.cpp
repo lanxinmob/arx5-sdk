@@ -49,14 +49,13 @@ void Arx5JointController::set_joint_traj(std::vector<JointState> new_traj)
 {
     require_healthy_();
     double start_time = get_timestamp();
-    std::vector<JointState> joint_traj;
+    // Replanning must start at the measured robot state.  Using the previous
+    // interpolator command here can leave a stale command between the old and
+    // new chunks, which is visible as a kick when a policy chunk is replaced.
+    JointState measured_state = get_joint_state();
+    measured_state.timestamp = start_time;
+    std::vector<JointState> joint_traj{measured_state};
     double avg_window_s = 0.05;
-    {
-        std::lock_guard<std::mutex> guard(cmd_mutex_);
-        joint_traj.push_back(interpolator_.interpolate(start_time - 2 * avg_window_s));
-        joint_traj.push_back(interpolator_.interpolate(start_time - avg_window_s));
-        joint_traj.push_back(interpolator_.interpolate(start_time));
-    }
 
     double prev_timestamp = 0;
     for (auto joint_state : new_traj)
@@ -81,6 +80,10 @@ void Arx5JointController::set_joint_traj(std::vector<JointState> new_traj)
 
     std::lock_guard<std::mutex> guard(cmd_mutex_);
     require_healthy_();
+    // Pin the interpolator to feedback before installing the future waypoints.
+    // This also handles the DRAG -> HOLD -> policy transition without replaying
+    // the command that was active before the operator released the arm.
+    interpolator_.init_fixed(measured_state);
     interpolator_.override_traj(get_timestamp(), joint_traj);
 }
 
