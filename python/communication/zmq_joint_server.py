@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 HOME_SPEED = 0.4  # Maximum planned joint speed in rad/s during return to home.
 HOME_TOLERANCE = 0.05
-HOLD_GAIN_RAMP_S = 0.1
+# Give the arm time to settle after the operator releases it before full
+# position gains are enabled.  A short ramp is perceptible as a kick at HOLD.
+HOLD_GAIN_RAMP_S = 0.3
 HOLD_GAIN_RAMP_STEPS = 5
 
 
