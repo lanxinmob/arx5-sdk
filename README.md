@@ -32,6 +32,19 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764
 ```
 
+The joint server enters gravity-compensated drag mode when the client requests
+`DRAG`. If an arm tilts up or backward while it is released, lower the
+feedforward only for that run, for example:
+
+```bash
+python communication/zmq_joint_server.py X5_umi can0 \
+  --port 8765 --gravity-scale 0.85
+```
+
+Tune this value with the arm supported and in a clear workspace; `1.0` remains
+the default. The server clears the active SDK trajectory before `DRAG`, so a
+stopped policy cannot move the arm while the episode recorder is closing.
+
 Absolute-joint policy clients should submit a complete future chunk with the
 `SET_JOINT_TRAJ` command. Its `joint_pos`, `gripper_pos`, and `time_from_now`
 arrays are sent once; the SDK then interpolates the stored trajectory in its
@@ -41,7 +54,7 @@ for single-point teleoperation and homing helpers.
 
 For human-to-policy handoff, the joint server handles `HOLD` by first pinning
 the SDK interpolator to the measured joint state, then enabling position gains.
-The gains ramp over 100 ms, which prevents the old reset/home command or a
+The gains ramp over 300 ms, which prevents the old reset/home command or a
 residual hand motion from producing a shock when `c` is pressed.
 
 In terminal 2, start the Quest bridge:

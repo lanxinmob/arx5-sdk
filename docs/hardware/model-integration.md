@@ -61,10 +61,18 @@ python communication/zmq_joint_server.py X5_umi can0 \
   --bind 127.0.0.1 --port 8765 --timeout 2 --duration 0.05
 ```
 
+`DRAG` clears any active policy trajectory before enabling the low-gain,
+gravity-compensated mode. If the released arm rises or leans backward, pass a
+lower `--gravity-scale` (for example `0.9`, `0.85`, or `0.8`) after checking
+the real arm is supported; the default is `1.0`. The scale is applied before
+the SDK controller is constructed.
+
 | cmd | data / 结果 |
 | --- | --- |
-| `GET_STATE` | None；返回 joint/EEF/gripper/timestamp/emergency/armed |
+| `GET_STATE` | None；返回 joint/EEF/gripper/timestamp/emergency/armed/mode |
 | `RESET_TO_HOME` | None；回零全开夹爪并 arm，回复 OK |
+| `DRAG` | None；清空旧插值目标，进入重力补偿拖动并 disarm |
+| `HOLD` | None；锁定当前实测关节位置，恢复位置增益并 arm |
 | `SET_JOINT_POS` | 精确包含 `joint_pos` 和 `gripper_pos`；返回实测状态 |
 | `SET_JOINT_TRAJ` | 精确包含 `(N, joint_dof)` 的 `joint_pos`、`(N,)` 的 `gripper_pos` 和 `(N,)` 的 `time_from_now`；一次替换 SDK 的未来轨迹并返回实测状态 |
 | `RETURN_TO_HOME` | None；仅 armed/健康时慢回零，保持当前夹爪；回复 OK 后仍 armed |

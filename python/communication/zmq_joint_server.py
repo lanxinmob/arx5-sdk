@@ -68,6 +68,11 @@ class JointServer:
             raise ValueError("SDK emergency is latched; resolve fault and restart controller")
         if self.drag_gain is None:
             self.refresh_gains()
+        # A policy trajectory may still be installed in the SDK interpolator
+        # when the client asks for human control.  Damping first replaces that
+        # trajectory with the measured state, so switching to zero-kp drag
+        # cannot expose an old policy/home target on the next controller tick.
+        self.controller.set_to_damping()
         self.controller.set_gain(self.drag_gain)
         self.armed = False
         self.mode = "drag"
@@ -300,7 +305,7 @@ class JointServer:
             return {"cmd": cmd, "data": f"ERROR: {error}"}
 
 
-def serve(model, interface, port, bind, timeout, duration):
+def serve(model, interface, port, bind, timeout, duration, gravity_scale):
     # SDK URDF paths are relative to python/.
     os.chdir(ROOT)
     import arx5_interface as sdk
@@ -311,6 +316,8 @@ def serve(model, interface, port, bind, timeout, duration):
         raise RuntimeError("SDK binding lacks set_joint_traj; rebuild the local SDK")
     robot = sdk.RobotConfigFactory.get_instance().get_config(model)
     robot.gripper_open_readout = -3.37472  # Same calibration as zmq_server.py.
+    if gravity_scale != 1.0:
+        robot.gravity_vector = robot.gravity_vector * gravity_scale
     config = sdk.ControllerConfigFactory.get_instance().get_config("joint_controller", robot.joint_dof)
     # Match the teleop follower: position tracking with gravity feedforward.
     config.gravity_compensation = True
@@ -323,7 +330,11 @@ def serve(model, interface, port, bind, timeout, duration):
             try:
                 controller = sdk.Arx5JointController(robot, config, interface)
                 server = JointServer(sdk, controller, robot, timeout=timeout, duration=duration)
-                print(f"Joint server: {model} {interface} at {bind}:{port}; awaiting RESET_TO_HOME", flush=True)
+                print(
+                    f"Joint server: {model} {interface} at {bind}:{port}; "
+                    f"gravity_scale={gravity_scale:g}; awaiting RESET_TO_HOME",
+                    flush=True,
+                )
                 while True:
                     server.check_timeout()
                     if socket.poll(20):
@@ -346,7 +357,17 @@ def serve(model, interface, port, bind, timeout, duration):
 @click.option("--bind", default="127.0.0.1", show_default=True)
 @click.option("--timeout", default=2.0, type=float, show_default=True)
 @click.option("--duration", default=0.05, type=float, show_default=True, help="SDK interpolation horizon, seconds.")
-def main(arms, ports, bind, timeout, duration):
+@click.option(
+    "--gravity-scale",
+    default=1.0,
+    type=click.FloatRange(min=0.0, min_open=True),
+    show_default=True,
+    help=(
+        "Scale gravity feedforward in DRAG mode. Lower this for an arm that "
+        "tilts up/back; try 0.9, 0.85, or 0.8 after a guarded static check."
+    ),
+)
+def main(arms, ports, bind, timeout, duration, gravity_scale):
     """Run one independent joint-position service per arm."""
     if len(arms) % 2:
         raise click.UsageError("Provide MODEL INTERFACE pairs")
@@ -367,13 +388,14 @@ def main(arms, ports, bind, timeout, duration):
     children = []
     try:
         if len(pairs) == 1:
-            serve(*pairs[0], ports[0], bind, timeout, duration)
+            serve(*pairs[0], ports[0], bind, timeout, duration, gravity_scale)
         else:
             for (model, interface), port in zip(pairs, ports):
                 children.append(subprocess.Popen([
                     sys.executable, "-u", str(Path(__file__).resolve()), model, interface,
                     "--port", str(port), "--bind", bind, "--timeout", str(timeout),
                     "--duration", str(duration),
+                    "--gravity-scale", str(gravity_scale),
                 ], start_new_session=True))
             while True:
                 for child in children:

@@ -76,7 +76,7 @@ python -B examples/record_episodes.py --check-cameras --no-preview \
 | `leader_follower_teleop.py` | 默认主臂 `-3.2969`，从臂 `-3.45369`；主重力倍率 1.2、从 1.0；速度不额外覆盖 | `-g`、`--follower-gripper-open-readout`、两臂 gravity-scale；0 读数表示用机型默认值。可选两臂 SDK 目标速度上限 `--joint-speed-limit` / `--gripper-speed-limit` |
 | `record_episodes.py` | 主臂 `-3.2969`，从臂 `-3.45369`；主重力倍率 1.2、从 1.0 | 两臂标定/gravity-scale CLI；独立 teleop 的新速度参数与回零等待不适用于 recorder |
 | `spacemouse_teleop.py` 直连 | 全开读数默认 `-3.45369`（本机右臂）；启动/回零后的夹爪目标为 `gripper_width` 全开；IK 拒绝时保持最后有效目标 | `-g` / `--gripper-open-readout` 显式覆盖，0 使用机型默认值；左臂传 `-3.2969`；限位保持不改变构造前标定 |
-| `zmq_joint_server.py` | 所有机型硬编码 `-3.37472` | 修改 `serve()` 中构造前赋值，双臂时按 model/interface 分配；当前没有标定 CLI |
+| `zmq_joint_server.py` | 所有机型默认硬编码 `-3.37472`；重力倍率默认 `1.0` | `--gravity-scale` 在构造前缩放 URDF 重力；夹爪读数仍需按 model/interface 修改并重新核验 |
 | `zmq_server_agent_safe.py` | 所有机型硬编码 `-3.37472` | 修改构造中的 `robot_config` 赋值；另设 `--gripper-max` 匹配宽度 |
 | `zmq_server.py` 旧服务 | 首次构造硬编码 `-3.37472`；超时后重建走机型简写构造，可能恢复工厂值 | 接新模型优先采用 documented joint/guarded 入口；旧服务要核对重建路径 |
 | `drag_mode.py` | 所有臂共用 `-g`，默认 `-3.4`；重力默认 1.0 | 不适合一条命令表达本机两臂不同读数；单臂分别启动或修改构造参数 |
