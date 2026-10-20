@@ -32,6 +32,12 @@ cd /home/hjadmin/projects/arx5-sdk/python
 python communication/zmq_joint_server.py X5_umi can0 X5 can1 --port 8765 --port 8764
 ```
 
+Absolute-joint policy clients should submit a complete future chunk with the
+`SET_JOINT_TRAJ` command. Its `joint_pos`, `gripper_pos`, and `time_from_now`
+arrays are sent once; the SDK then interpolates the stored trajectory in its
+500 Hz controller loop. `SET_JOINT_POS` remains available for single-point
+teleoperation and homing helpers.
+
 In terminal 2, start the Quest bridge:
 
 ```bash
