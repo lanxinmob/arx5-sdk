@@ -73,16 +73,14 @@ class JointServer:
         """Lock the current measured position and accept joint targets."""
         if self.controller.is_emergency():
             raise ValueError("SDK emergency is latched; resolve fault and restart controller")
-        joint = self.controller.get_joint_state()
-        position = np.asarray(joint.pos(), dtype=float).copy()
-        gripper = float(np.clip(joint.gripper_pos, 0, self.robot.gripper_width))
-        command = self.sdk.JointState(self.robot.joint_dof)
-        command.pos()[:] = position
-        command.gripper_pos = gripper
-        command.timestamp = self.controller.get_timestamp() + self.duration
-        self.controller.set_joint_cmd(command)
         if self.hold_gain is None:
             self.refresh_gains()
+        # Drag mode leaves the previous position command in the SDK
+        # interpolator.  Calling set_joint_cmd() here can briefly expose that
+        # stale command when the high position gain is enabled.  Damping first
+        # pins the interpolator to the measured state, so HOLD starts from the
+        # pose at which the operator released the arm.
+        self.controller.set_to_damping()
         self.controller.set_gain(self.hold_gain)
         self.armed = True
         self.mode = "hold"

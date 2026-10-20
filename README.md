@@ -39,6 +39,10 @@ arrays are sent once; the SDK then interpolates the stored trajectory in its
 predictions to 100 Hz before sending them. `SET_JOINT_POS` remains available
 for single-point teleoperation and homing helpers.
 
+For human-to-policy handoff, the joint server handles `HOLD` by first pinning
+the SDK interpolator to the measured joint state, then enabling position gains.
+This prevents the old reset/home command from being exposed when `c` is pressed.
+
 In terminal 2, start the Quest bridge:
 
 ```bash
