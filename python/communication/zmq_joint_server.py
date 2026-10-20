@@ -27,7 +27,16 @@ class JointServer:
         self.sdk, self.controller, self.robot = sdk, controller, robot
         self.timeout, self.duration = timeout, duration
         self.armed = False
+        self.mode = "damping"
         self.last_action = 0.0
+        # Keep the SDK's configured gains so DRAG/HOLD can switch modes
+        # without duplicating robot-specific controller constants.
+        self.hold_gain = controller.get_gain()
+        self.drag_gain = controller.get_gain()
+        self.drag_gain.kp()[:] = 0.0
+        self.drag_gain.kd()[:] = self.hold_gain.kd() * 0.05
+        self.drag_gain.gripper_kp = 0.0
+        self.drag_gain.gripper_kd = 0.05
 
     def state(self):
         joint = self.controller.get_joint_state()
@@ -38,11 +47,40 @@ class JointServer:
             joint_torque=joint.torque().copy(), gripper_pos=joint.gripper_pos,
             gripper_vel=joint.gripper_vel, gripper_torque=joint.gripper_torque,
             emergency=self.controller.is_emergency(), armed=self.armed,
+            mode=self.mode,
         )
 
     def disarm(self):
         self.armed = False
+        self.mode = "damping"
         self.controller.set_to_damping()
+
+    def drag(self):
+        """Enable low-gain physical dragging without accepting targets."""
+        if self.controller.is_emergency():
+            raise ValueError("SDK emergency is latched; resolve fault and restart controller")
+        self.controller.set_gain(self.drag_gain)
+        self.armed = False
+        self.mode = "drag"
+        return self.state()
+
+    def hold(self):
+        """Lock the current measured position and accept joint targets."""
+        if self.controller.is_emergency():
+            raise ValueError("SDK emergency is latched; resolve fault and restart controller")
+        joint = self.controller.get_joint_state()
+        position = np.asarray(joint.pos(), dtype=float).copy()
+        gripper = float(np.clip(joint.gripper_pos, 0, self.robot.gripper_width))
+        command = self.sdk.JointState(self.robot.joint_dof)
+        command.pos()[:] = position
+        command.gripper_pos = gripper
+        command.timestamp = self.controller.get_timestamp() + self.duration
+        self.controller.set_joint_cmd(command)
+        self.controller.set_gain(self.hold_gain)
+        self.armed = True
+        self.mode = "hold"
+        self.last_action = time.monotonic()
+        return self.state()
 
     def check_timeout(self):
         if not self.armed:
@@ -154,10 +192,16 @@ class JointServer:
                     raise ValueError("SDK emergency during reset")
                 self.last_action = time.monotonic()
                 self.armed = True
+                self.mode = "hold"
+                self.controller.set_gain(self.hold_gain)
                 data = "OK"
             elif cmd == "SET_TO_DAMPING":
                 self.disarm()
                 data = "OK"
+            elif cmd == "DRAG":
+                data = self.drag()
+            elif cmd == "HOLD":
+                data = self.hold()
             elif cmd == "RETURN_TO_HOME":
                 self.return_home()
                 data = "OK"
