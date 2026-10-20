@@ -57,6 +57,11 @@ the SDK interpolator to the measured joint state, then enabling position gains.
 The gains ramp over 300 ms, which prevents the old reset/home command or a
 residual hand motion from producing a shock when `c` is pressed.
 
+Pressing Ctrl+C while the joint server is in `DRAG` or `HOLD` first locks the
+measured pose when needed, then returns the arm slowly to the SDK home pose and
+finally enters damping. If the server has not completed its initial reset, it
+does not force a home motion during shutdown.
+
 In terminal 2, start the Quest bridge:
 
 ```bash

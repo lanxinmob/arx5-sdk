@@ -78,6 +78,10 @@ the SDK controller is constructed.
 | `RETURN_TO_HOME` | None；仅 armed/健康时慢回零，保持当前夹爪；回复 OK 后仍 armed |
 | `SET_TO_DAMPING` | None；disarm/阻尼，回复 OK |
 
+在 `DRAG` 或 `HOLD` 状态按 Ctrl+C 停止 server 时，server 会先锁定拖动状态
+下的当前实测关节位置（如有需要），再按同一慢速回零流程回到 SDK home，最后
+进入阻尼。启动后尚未完成 `RESET_TO_HOME` 时只进入阻尼，不强制移动。
+
 ```python
 {"cmd": "SET_JOINT_POS", "data": {
     "joint_pos": [q0, q1, q2, q3, q4, q5],  # 绝对 rad

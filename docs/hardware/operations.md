@@ -168,7 +168,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | 入口 | 启动 / arm | 没有动作时 | 正常停止 |
 | --- | --- | --- | --- |
 | SDK controller | 构造即收发电机，初始 kp=0/阻尼增益；可能有重力输出 | 没有应用层 watchdog，后台继续最后插值/输出 | 默认析构关闭重力并约 2 s 阻尼；非断电 |
-| joint ZMQ | 启动 disarmed；`RESET_TO_HOME` 全开夹爪并 armed | armed 后默认 2 s 无接受关节目标，尝试两段慢回零保持夹爪，再 disarm/阻尼 | server 停止同样尝试慢回零；`SET_TO_DAMPING` 直接 disarm |
+| joint ZMQ | 启动 disarmed；`RESET_TO_HOME` 全开夹爪并 armed | armed 后默认 2 s 无接受关节目标，尝试两段慢回零保持夹爪，再 disarm/阻尼 | server 在 `DRAG`/`HOLD` 下也先锁定当前实测姿态并慢回零，最后阻尼；启动尚未 reset 时只阻尼；`SET_TO_DAMPING` 直接 disarm |
 | guarded Cartesian ZMQ | disarmed；reset 后用 SDK reset 命令位姿 arm | 默认 2 s 无接受末端目标，阻尼/disarm；不回零 | Ctrl+C close 请求阻尼；SIGTERM 无自定义 handler，不当成同等恢复路径 |
 | SpaceMouse 直连 | 构造前应用夹爪读数（默认 `-3.45369`）；启动立即 reset；双钮再次 reset；夹爪目标均全开 | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |
 | Quest bridge | 两手流到达后双臂 reset | stale hold 后 packet loss 停止，reset 阶段例外 | 健康 armed 臂慢回零保持夹爪，再阻尼 |

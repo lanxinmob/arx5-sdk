@@ -157,9 +157,20 @@ class JointServer:
 
     def safe_return_home(self, reason):
         try:
-            if self.armed and not self.controller.is_emergency():
-                print(f"Joint server: slow return to home ({reason})", flush=True)
-                self.return_home()
+            if not self.controller.is_emergency():
+                # DRAG deliberately disarms the server, but a normal shutdown
+                # still needs to leave the arm at home. Lock the measured drag
+                # pose before enabling position gains so the first home command
+                # cannot jump through a stale policy target.
+                if self.mode == "drag":
+                    print(
+                        "Joint server: locking drag pose before return to home",
+                        flush=True,
+                    )
+                    self.hold()
+                if self.armed:
+                    print(f"Joint server: slow return to home ({reason})", flush=True)
+                    self.return_home()
         except Exception as error:
             print(f"Joint server: return to home failed ({reason}): {error}", flush=True)
         finally:
