@@ -191,9 +191,25 @@ python examples/calibrate.py X5_umi can0 --verify-zero \
 
 验证模式也先在连接 CAN 前提示闭合，再按 closed_1 / fully_open / closed_2 的提示轻轻操作，保存三行 `[zero-check]`，全程不重设零点。`angle_rad = SDK开度 / gripper_width * gripper_open_readout`；`width_mm` 是模型换算，不是尺子测量。两次闭合不接近零提示零偏，重复性差提示间隙或操作问题，不能用挤压变形设零。正常换算为 `width = motor_angle / open_readout * gripper_width`。
 
-若一开始就因 `Gripper position error` 无法构造控制器，先对照实物检查符号、当前开度和已知正确读数；不要反复用默认参数重启，更不能放宽保护来硬跑标定。关节零位只在明确更改零点的任务中操作；`calibrate_joint` 当前未接到默认 CLI，需显式选择函数，参数是 0 起始关节索引且必须有实物零位依据。
+若一开始就因 `Gripper position error` 无法构造控制器，先对照实物检查符号、当前开度和已知正确读数；不要反复用默认参数重启，更不能放宽普通 controller 的保护来硬跑标定。确认闭合读数异常时，SocketCAN 可使用下面的独立夹爪恢复入口。关节零位只在明确更改零点的任务中操作；`calibrate_joint` 当前未接到默认 CLI，需显式选择函数，参数是 0 起始关节索引且必须有实物零位依据。
 
-例如默认 `--gripper-open-readout -3.34`、宽度 `0.086 m` 却报 `got -0.072`，按上式反推电机角度约为 `+2.80 rad`（日志开度已舍入）。此时读数配置已经是负数，通用日志中的“改成负数”不是新的修复办法；换成历史负值 `-3.45369` 也仍会换算成负开度。若报错时张开，先按启动提示轻闭后再检查；若轻闭状态仍失败，闭合零点或方向需要进一步核验，不能凭这条日志认定硬件方向相反或直接翻转符号。启动前提示不修复已有错误零点。
+例如默认 `--gripper-open-readout -3.34`、宽度 `0.086 m`，张开时报 `got -0.072`，闭合后报 `got -0.160`，按上式反推电机角度分别约为 `+2.80/+6.21 rad`（日志开度已舍入）。开合差约 `-3.42 rad`，支持闭合零点偏移的判断。配置已经是负数，换成历史负值 `-3.45369` 也仍会换算成负开度；不能凭通用日志直接翻转符号。启动前提示不修复已有错误零点。
+
+<a id="calibration-recovery"></a>
+### 初始化被异常零点阻断时恢复（电机操作）
+
+仅适用于 Linux SocketCAN 与机型配置中的独立 `DM_J4310` 夹爪。先停止该 CAN 上其他控制程序，可靠支撑机械臂，清空夹爪：本入口不创建 arm controller，**不会给其他关节提供阻尼或重力补偿**。
+
+```bash
+python examples/calibrate.py X5_umi can0 --recover-zero
+```
+
+1. 轻闭到指尖接触，回车连接 CAN。入口只向配置的夹爪电机 ID 发送失能、零力矩和使能帧（本机为 ID 8），读取原始角度，不依赖开度换算或正常 controller 初始化。
+2. 查看 `[recovery] closed_before_reset`；保持轻闭，再回车才写夹爪电机零点。写入前检查位置稳定、低速度和低负载；不会写其他关节的零点。
+3. 等待 `[recovery] closed_after_reset`，新反馈角度须在零附近（`abs(angle)<=0.02 rad`），随后按提示手动全开、再次轻闭。全开值保留符号；再次闭合也须接近零。只有这些检查通过才打印 `Fully-open joint position readout`。
+4. 记录输出的全开角度和实测宽度，更新所有控制入口，再用 `--verify-zero --gripper-open-readout` 传入这次输出的角度验收。恢复入口不自动持久化标定值；`--gripper-open-readout` 不参与恢复换算，`--recover-zero` 不能与 `--verify-zero` 同用。
+
+每次采样会清空接收队列再发送零力矩帧，等待最多 1 s 的新反馈；电机故障、另一进程发送 CAN、明显运动/负载或不稳定读数会报错。设零后的超时或非零反馈不代表恢复成功，日志 `zero_reset_sent` 只证明发出了命令。退出、取消或异常时尝试失能夹爪并关闭 socket；不自动回零、不重试写零、不启动普通 controller。普通 controller 的范围保护保持原样。此恢复路径已做离线协议对照和替身验证，尚未执行真机恢复验收。
 
 <a id="peripherals"></a>
 ## 外设与无 CAN 验收
