@@ -50,8 +50,10 @@ class _GripperCAN:
         torque = (((data[4] & 0x0F) << 8) | data[5]) * 36.0 / 4095 - 18.0
         return angle, speed, torque * 0.424
 
-    def measure(self):
+    def measure(self, label=None):
         angles = []
+        speeds = []
+        torques = []
         for _ in range(10):
             # Discard queued feedback before requesting a new zero-torque reply.
             self.socket.settimeout(0.0)
@@ -83,10 +85,20 @@ class _GripperCAN:
                     f"torque={torque:.3f} Nm"
                 )
             angles.append(angle)
+            speeds.append(speed)
+            torques.append(torque)
             time.sleep(0.01)
+        average = sum(angles) / len(angles)
+        if label:
+            click.echo(
+                f"[recovery] {label} angle_rad={average:.6f} "
+                f"angle_range=[{min(angles):.6f}, {max(angles):.6f}] "
+                f"speed_max_rad_s={max(abs(v) for v in speeds):.6f} "
+                f"torque_Nm={sum(torques)/len(torques):.6f}"
+            )
         if max(angles) - min(angles) > 0.02:
             raise RuntimeError("Gripper moved during measurement; hold it still")
-        return sum(angles) / len(angles)
+        return average
 
 
 def _recover_gripper_zero(robot_config, interface):
@@ -113,27 +125,31 @@ def _recover_gripper_zero(robot_config, interface):
             time.sleep(0.02)
             gripper.send(gripper.ZERO_TORQUE)
             gripper.send(gripper.ENABLE)
-            closed = gripper.measure()
-            click.echo(f"[recovery] closed_before_reset angle_rad={closed:.6f}")
+            closed = gripper.measure("closed_before_reset")
             input("Keep the fingertips gently touching; press Enter to WRITE the gripper motor zero: ")
-            if abs(gripper.measure() - closed) > 0.02:
+            if abs(gripper.measure("closed_before_write") - closed) > 0.02:
                 raise RuntimeError("Closed position changed before reset; motor zero was NOT written")
             gripper.send(gripper.RESET_ZERO)
             click.echo("[recovery] zero_reset_sent; awaiting fresh feedback")
             time.sleep(0.1)
-            closed = gripper.measure()
-            click.echo(f"[recovery] closed_after_reset angle_rad={closed:.6f}")
-            if abs(closed) > 0.02:
+            zero_check = gripper.measure("closed_after_reset")
+            if abs(zero_check) > 0.02:
                 raise RuntimeError("Zero reset was sent but fresh feedback is not near zero; recovery NOT verified")
             input("Fully open the gripper by hand, hold still, then press Enter: ")
-            opened = gripper.measure()
+            opened = gripper.measure("fully_open")
             if abs(opened) < 0.1:
                 raise RuntimeError("Fully-open readout is too close to zero; check the physical open position")
             input("Gently close the gripper again, hold still, then press Enter: ")
-            closed = gripper.measure()
-            click.echo(f"[recovery] closed_again angle_rad={closed:.6f}")
+            closed = gripper.measure("closed_again")
             if abs(closed) > 0.02:
-                raise RuntimeError("Repeated closed readout is not near zero; check the zero and mechanism")
+                width_mm = closed / opened * robot_config.gripper_width * 1000
+                raise RuntimeError(
+                    f"Repeated closed readout is not near zero: angle={closed:.6f} rad, "
+                    f"change_from_zero_check={closed-zero_check:.6f} rad, "
+                    f"model_width={width_mm:.3f} mm. The motor zero WAS written earlier; "
+                    "the fully_open measurement above is diagnostic only, calibration NOT accepted. "
+                    "Use --verify-zero to check closure repeatability without writing zero again."
+                )
             click.echo(f"Fully-open joint position readout: {opened:.6f}")
             click.echo("Record this signed readout and the measured opening width in every control entry point.")
             completed = True

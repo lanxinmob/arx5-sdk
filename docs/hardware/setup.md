@@ -206,10 +206,18 @@ python examples/calibrate.py X5_umi can0 --recover-zero
 
 1. 轻闭到指尖接触，回车连接 CAN。入口只向配置的夹爪电机 ID 发送失能、零力矩和使能帧（本机为 ID 8），读取原始角度，不依赖开度换算或正常 controller 初始化。
 2. 查看 `[recovery] closed_before_reset`；保持轻闭，再回车才写夹爪电机零点。写入前检查位置稳定、低速度和低负载；不会写其他关节的零点。
-3. 等待 `[recovery] closed_after_reset`，新反馈角度须在零附近（`abs(angle)<=0.02 rad`），随后按提示手动全开、再次轻闭。全开值保留符号；再次闭合也须接近零。只有这些检查通过才打印 `Fully-open joint position readout`。
+3. 等待 `[recovery] closed_after_reset`，新反馈角度须在零附近（`abs(angle)<=0.02 rad`），随后按提示手动全开、再次轻闭。每阶段即时打印角度、采样范围、最大速度与平均力矩，`fully_open` 在重复闭合检查前就会保留；检查失败时它只是诊断数据。再次闭合也须接近零，所有检查通过才打印最终 `Fully-open joint position readout`。
 4. 记录输出的全开角度和实测宽度，更新所有控制入口，再用 `--verify-zero --gripper-open-readout` 传入这次输出的角度验收。恢复入口不自动持久化标定值；`--gripper-open-readout` 不参与恢复换算，`--recover-zero` 不能与 `--verify-zero` 同用。
 
-每次采样会清空接收队列再发送零力矩帧，等待最多 1 s 的新反馈；电机故障、另一进程发送 CAN、明显运动/负载或不稳定读数会报错。设零后的超时或非零反馈不代表恢复成功，日志 `zero_reset_sent` 只证明发出了命令。退出、取消或异常时尝试失能夹爪并关闭 socket；不自动回零、不重试写零、不启动普通 controller。普通 controller 的范围保护保持原样。此恢复路径已做离线协议对照和替身验证，尚未执行真机恢复验收。
+每次采样会清空接收队列再发送零力矩帧，等待最多 1 s 的新反馈；电机故障、另一进程发送 CAN、明显运动/负载或不稳定读数会报错。设零后的超时或非零反馈不代表恢复成功，日志 `zero_reset_sent` 只证明发出了命令。退出、取消或异常时尝试失能夹爪并关闭 socket；不自动回零、不重试写零、不启动普通 controller。普通 controller 的范围保护保持原样。协议定义见 [DM-J4310-2EC V1.1 手册 p17](https://github.com/dmBots/DM-J4310-2EC/blob/master/manual/DM-J4310-2EC%20V1.1%20Geared%20Motor%20User%20Manual%20V1.3%202026-09-14.pdf)。
+
+若设零后接近零、再次闭合却超差，零点已被写过，完整标定仍未通过。先保留数据，使用不写零点的验证检查重复性：
+
+```bash
+python examples/calibrate.py X5_umi can0 --verify-zero --gripper-open-readout -3.34
+```
+
+这里 `-3.34` 只是已知方向的临时换算参考，不是新的全开标定值；`angle_rad` 是反算的原始电机角度，不受此换算参考的幅值影响。验证会构造普通 controller、关闭重力补偿，先支撑机械臂并停止其他 CAN 控制程序。三次操作均使用相同的轻触标准，不挤压指尖，保存三行 `[zero-check]`。闭合时已经报范围错误则停止，保留最早日志，不循环重新写零。不能单凭重复偏差认定电机归零失效、手持力度或传动间隙；不要放宽验收阈值掩盖原因。操作者本次设零后 `-0.000153 rad`、再次闭合 `-0.061532 rad` 的结果尚未通过，见 [本机记录](current-machine.md#证据与更新)。
 
 <a id="peripherals"></a>
 ## 外设与无 CAN 验收
