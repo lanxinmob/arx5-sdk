@@ -50,11 +50,34 @@ def calibrate_gripper(model: str, interface: str, verify_zero: bool, gripper_ope
     if not gripper_open_readout or not math.isfinite(gripper_open_readout):
         raise click.BadParameter("Must be finite and nonzero", param_hint="--gripper-open-readout")
     robot_config.gripper_open_readout = gripper_open_readout
-    #robot_config.gripper_width = 0.088
-    
-    joint_controller = arx5.Arx5JointController(
-        robot_config, joint_controller_config, interface
+
+    click.echo(
+        f"Gripper startup: model={model}, interface={interface}, "
+        f"gripper_open_readout={robot_config.gripper_open_readout:g} rad, "
+        f"gripper_width={robot_config.gripper_width:g} m."
     )
+    click.echo(
+        "Stop other controllers on this CAN interface and support the arm; "
+        "gravity compensation is OFF. The controller checks the current gripper "
+        "position before calibration can reset its zero."
+    )
+    input(
+        "Before connecting CAN, gently close the empty gripper until the fingertips "
+        "touch without squeezing/deforming them, then press Enter (Ctrl+C to cancel): "
+    )
+    try:
+        joint_controller = arx5.Arx5JointController(
+            robot_config, joint_controller_config, interface
+        )
+    except RuntimeError as exc:
+        raise click.ClickException(
+            f"Controller initialization failed: {exc}. The motor zero was not reset. "
+            "Check the first SDK error above. For a gripper position error, check "
+            "the physical closed position, motor zero and signed fully-open readout "
+            f"(currently {gripper_open_readout:g} rad). If already closed, changing "
+            "the readout magnitude alone cannot fix a wrong sign or zero. "
+            "See docs/hardware/setup.md#calibration in the repository root."
+        ) from exc
     if not verify_zero:
         joint_controller.calibrate_gripper()
         return

@@ -42,6 +42,8 @@ python -B -c 'import sys, arx5_interface as s; print(sys.executable); print(s.__
 
 `Gripper position error` 检测开度小于 -0.005 m 或大于 `gripper_width+0.005 m`，会锁存 emergency。新夹爪电机方向不同可能需要负 `gripper_open_readout`，但不能只把任意 `-3.4` 当正确结果。逐入口核对 [覆盖表](current-machine.md#calibration-overrides)，重设零点则按 [标定](setup.md#calibration)。
 
+标定脚本也必须先通过 controller 初始化检查，报错发生在构造时就尚未重设零点。脚本在连接 CAN 前提示轻闭并显示有效配置；若配置已经为负，不能再把通用日志的“改成负数”当成诊断。`-3.34 rad / 0.086 m` 配置报 `-0.072 m` 对应约 `+2.80 rad` 的电机读数；先确认实际开度，轻闭后仍失败则检查零点和方向，不能靠改另一个负数消除符号错误。
+
 空载闭合时同时看实物、`gripper_mm`、`gripper_cmd_mm`、torque、kp 与日志：
 
 | 事实 | 下一步 |

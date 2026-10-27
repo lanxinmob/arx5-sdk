@@ -80,7 +80,7 @@ python -B examples/record_episodes.py --check-cameras --no-preview \
 | `zmq_server_agent_safe.py` | 所有机型硬编码 `-3.37472` | 修改构造中的 `robot_config` 赋值；另设 `--gripper-max` 匹配宽度 |
 | `zmq_server.py` 旧服务 | 首次构造硬编码 `-3.37472`；超时后重建走机型简写构造，可能恢复工厂值 | 接新模型优先采用 documented joint/guarded 入口；旧服务要核对重建路径 |
 | `drag_mode.py` | 所有臂共用 `-g`，默认 `-3.4`；重力默认 1.0 | 不适合一条命令表达本机两臂不同读数；单臂分别启动或修改构造参数 |
-| `calibrate.py` | 默认 `--gripper-open-readout -3.34`，关闭重力补偿 | 验证模式显式传每臂当前值；标定会重设闭合电机零点 |
+| `calibrate.py` | 默认 `--gripper-open-readout -3.34`，关闭重力补偿；显示有效值并在连接 CAN 前提示轻闭 | 验证模式显式传每臂当前值；初始化成功后按 SDK 提示确认才重设闭合电机零点；`--verify-zero` 不重设 |
 
 主从/采集闭合阈值为 `0.001 m`，夹爪 kp 默认 5。已有记录指出实物闭合小缝及重复性仍未完全解决；这些读数不是精度保证。SDK 接触保持在默认阈值 `0.75 Nm` 触发，1 mm 卸载，反向命令超过 0.5 mm 释放；默认 `1.5 Nm` 过流检测仍保留，见 [排障](troubleshooting.md#gripper)。
 

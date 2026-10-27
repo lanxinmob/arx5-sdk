@@ -168,6 +168,7 @@ python examples/record_episodes.py X5 can1 X5_umi can0 \
 | 入口 | 启动 / arm | 没有动作时 | 正常停止 |
 | --- | --- | --- | --- |
 | SDK controller | 构造即收发电机，初始 kp=0/阻尼增益；可能有重力输出 | 没有应用层 watchdog，后台继续最后插值/输出 | 默认析构关闭重力并约 2 s 阻尼；非断电 |
+| gripper calibration / verify-zero | 连接 CAN 前显示标定参数，提示支撑机械臂并轻闭空夹爪；回车后构造，重力关闭 | 手动按提示操作；默认模式初始化成功后再次确认才写闭合零点，verify-zero 只测量 | 连接前 Ctrl+C/EOF 不创建 controller；构造失败不进入标定；成功后退出沿用 SDK 析构，无回零 |
 | joint ZMQ | 启动 disarmed；`RESET_TO_HOME` 全开夹爪并 armed | armed 后默认 2 s 无接受关节目标，尝试两段慢回零保持夹爪，再 disarm/阻尼 | server 在 `DRAG`/`HOLD` 下也先锁定当前实测姿态并慢回零，最后阻尼；启动尚未 reset 时只阻尼；`SET_TO_DAMPING` 直接 disarm |
 | guarded Cartesian ZMQ | disarmed；reset 后用 SDK reset 命令位姿 arm | 默认 2 s 无接受末端目标，阻尼/disarm；不回零 | Ctrl+C close 请求阻尼；SIGTERM 无自定义 handler，不当成同等恢复路径 |
 | SpaceMouse 直连 | 构造前应用夹爪读数（默认 `-3.45369`）；启动立即 reset；双钮再次 reset；夹爪目标均全开 | IK 拒绝时保持最后有效目标，反向至可达后恢复；无外设断流检查 | Ctrl+C 回零再阻尼；其他异常不保证回零 |

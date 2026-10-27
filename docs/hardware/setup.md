@@ -180,7 +180,7 @@ cd python
 python examples/calibrate.py X5_umi can0
 ```
 
-默认入口是 `calibrate_gripper`：手动轻轻闭合指尖，回车重设电机零点；手动完全张开，回车读取 `Fully-open joint position readout`。它不会自动持久化全开角度或测量实物宽度。记录带符号角度和实测宽度，将其应用到所有会构造该臂控制器的入口（见 [覆盖表](current-machine.md#calibration-overrides)）。脚本当前提示更新 config.h，但 CLI/Python 构造前覆盖同样可用。
+默认入口是 `calibrate_gripper`：脚本先显示有效的全开读数和宽度，在连接 CAN **之前**要求轻轻闭合空夹爪，指尖接触即可，不要挤压变形；回车后才构造 controller。初始化通过后，SDK 再次提示确认闭合，此时回车才重设电机零点；随后手动完全张开，回车读取 `Fully-open joint position readout`。初始化失败会保留 SDK 原始日志并提示零点尚未重设。它不会自动持久化全开角度或测量实物宽度。记录带符号角度和实测宽度，将其应用到所有会构造该臂控制器的入口（见 [覆盖表](current-machine.md#calibration-overrides)）。SDK 提示更新 config.h，但 CLI/Python 构造前覆盖同样可用。
 
 不重设零点的验证（下面数值仅本机右臂）：
 
@@ -189,9 +189,11 @@ python examples/calibrate.py X5_umi can0 --verify-zero \
   --gripper-open-readout -3.45369
 ```
 
-按 closed_1 / fully_open / closed_2 的提示轻轻操作，保存三行 `[zero-check]`。`angle_rad = SDK开度 / gripper_width * gripper_open_readout`；`width_mm` 是模型换算，不是尺子测量。两次闭合不接近零提示零偏，重复性差提示间隙或操作问题，不能用挤压变形设零。正常换算为 `width = motor_angle / open_readout * gripper_width`。
+验证模式也先在连接 CAN 前提示闭合，再按 closed_1 / fully_open / closed_2 的提示轻轻操作，保存三行 `[zero-check]`，全程不重设零点。`angle_rad = SDK开度 / gripper_width * gripper_open_readout`；`width_mm` 是模型换算，不是尺子测量。两次闭合不接近零提示零偏，重复性差提示间隙或操作问题，不能用挤压变形设零。正常换算为 `width = motor_angle / open_readout * gripper_width`。
 
 若一开始就因 `Gripper position error` 无法构造控制器，先对照实物检查符号、当前开度和已知正确读数；不要反复用默认参数重启，更不能放宽保护来硬跑标定。关节零位只在明确更改零点的任务中操作；`calibrate_joint` 当前未接到默认 CLI，需显式选择函数，参数是 0 起始关节索引且必须有实物零位依据。
+
+例如默认 `--gripper-open-readout -3.34`、宽度 `0.086 m` 却报 `got -0.072`，按上式反推电机角度约为 `+2.80 rad`（日志开度已舍入）。此时读数配置已经是负数，通用日志中的“改成负数”不是新的修复办法；换成历史负值 `-3.45369` 也仍会换算成负开度。若报错时张开，先按启动提示轻闭后再检查；若轻闭状态仍失败，闭合零点或方向需要进一步核验，不能凭这条日志认定硬件方向相反或直接翻转符号。启动前提示不修复已有错误零点。
 
 <a id="peripherals"></a>
 ## 外设与无 CAN 验收

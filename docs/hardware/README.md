@@ -29,7 +29,7 @@
 | SLCAN、candleLight、EtherCAT、udev、1 Mbps | [CAN 配置](setup.md#can) | 根 README 的适配器章节、[CAN API](../../include/hardware/arx_can.h) |
 | 本机序列号、can0/can1、左右臂、Vin | [当前机器](current-machine.md#devices) | 系统 udev/service + 已有 README 记录 |
 | 模型名、DOF、电机 ID、URDF、重力、增益 | [机型配置](setup.md#robot-config) | [配置工厂](../../include/app/config.h)、[绑定与类型](../../python/arx5_interface.pyi) |
-| 夹爪符号、全开角度、闭合零点、verify-zero | [标定](setup.md#calibration) | [标定入口](../../python/examples/calibrate.py)、[标定实现](../../src/app/joint_controller.cpp) |
+| 夹爪符号、全开角度、闭合零点、verify-zero、初始化夹爪范围报错 | [标定](setup.md#calibration) | [标定入口](../../python/examples/calibrate.py)：连接前提示轻闭；[标定实现](../../src/app/joint_controller.cpp) |
 | SpaceMouse、spacenavd、双按钮、限位保持、初始夹爪全开、默认夹爪读数 `-3.45369` | [鼠标遥操](operations.md#spacemouse) | [直连示例](../../python/examples/spacemouse_teleop.py) |
 | Quest、10000、PosCmd、A/X、reset marker | [Quest 遥操](operations.md#quest) | [VR bridge](../../python/communication/vr_joint_bridge.py)、[解码器](../../python/communication/vr_receiver.py) |
 | 主从、拖动、重力倍率、力反馈、目标速度上限与回零反馈等待 | [主从与拖动](operations.md#leader-follower) | [主从入口](../../python/examples/leader_follower_teleop.py)、[拖动入口](../../python/examples/drag_mode.py) |
@@ -71,6 +71,8 @@ checkpoint 路径与版本 / normalization key / 观测与动作形状:
 维护规则：新增控制入口时同步索引、标定覆盖表和退出矩阵；更换相机/夹爪/工具后重新核对快照及动作合同。测试产物用临时目录，验证完删除，不在仓库新增永久 test 文件。
 
 ## 本次文档验证
+
+2026-10-27 夹爪标定入口在构造 controller 前显示有效参数并提示轻闭空夹爪，初始化失败时保留原始 SDK 日志并说明零点尚未重设。离线替身验证提示顺序、无效参数拒绝、连接前 Ctrl+C/EOF、初始化急停、带符号参数覆盖及 verify-zero 三段测量通过；实际 SDK 的 help 与脚本语法通过。未创建真机 controller、未重设零点、未留测试文件。操作者确认本次报错时夹爪张开；闭合后能否初始化及实物标定结果尚未验证。
 
 2026-10-17 SpaceMouse 直连的 `-g` 默认改为本机右臂读数 `-3.45369`，右臂命令可省略此参数。离线替身验证默认值、显式左右臂读数、`-g 0` 回退机型默认值及 help 通过；未创建 SDK controller、未连接 CAN、未重新验证实物标定。参数覆盖表及退出矩阵已同步，退出行为未改变，未生成测试文件。
 
