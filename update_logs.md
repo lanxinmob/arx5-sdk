@@ -15,7 +15,7 @@
 
 ## Update (2024.08.22)
 - Enable one-step waypoint scheduling (see `python/examples`).
-- Support EtherCAT-CAN adapter (follow the instructions in [EtherCAT-CAN setup](README.md#ethercat-can-setup)).
+- Support EtherCAT-CAN adapter (follow the instructions in [EtherCAT-CAN setup](https://github.com/real-stanford/arx5-sdk)).
 - Support arbitrary DoF robot arm (not only 6DoF); thoguh other DoF numbers are not tested yet.
 - Allow setting up robot and controller configurations as arguments (see `config.h` and `test_joint_control.py`), thanks to [Yifan Hou](https://yifan-hou.github.io/)
 
